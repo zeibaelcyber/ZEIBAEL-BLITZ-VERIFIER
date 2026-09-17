@@ -6,6 +6,8 @@ import { createHash } from 'node:crypto';
 
 const started = Date.now();
 const checks = [];
+const ZEIBAEL_SYSTEM_HEALTH_URL = process.env.ZEIBAEL_SYSTEM_HEALTH_URL ||
+  'https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-blitz-health';
 
 async function check(name, fn, { required = true } = {}) {
   const t0 = Date.now();
@@ -23,6 +25,25 @@ async function check(name, fn, { required = true } = {}) {
   }
 }
 
+async function fetchJson(url, ms = 10000) {
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'https:') throw new Error(`HTTPS required: ${parsed.protocol}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      signal: controller.signal,
+      redirect: 'follow',
+    });
+    const payload = await response.json().catch(() => null);
+    return { response, payload, origin: parsed.origin };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function configuredHttp(name, envName) {
   const url = process.env[envName];
   if (!url) {
@@ -31,17 +52,9 @@ async function configuredHttp(name, envName) {
   }
 
   await check(name, async () => {
-    const parsed = new URL(url);
-    if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error(`Unsupported protocol: ${parsed.protocol}`);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    try {
-      const response = await fetch(url, { method: 'GET', signal: controller.signal, redirect: 'follow' });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return { origin: parsed.origin, status: response.status };
-    } finally {
-      clearTimeout(timer);
-    }
+    const { response, origin } = await fetchJson(url, 8000);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return { origin, status: response.status };
   }, { required: true });
 }
 
@@ -87,14 +100,33 @@ await check('runtime.timer', async () => {
   return { elapsed_ms: elapsed };
 });
 
-await configuredHttp('target.supabase', 'SUPABASE_HEALTH_URL');
-await configuredHttp('target.convex', 'CONVEX_HEALTH_URL');
-await configuredHttp('target.zeibael_canary', 'ZEIBAEL_CANARY_URL');
+await check('zeibael.system_health', async () => {
+  const { response, payload, origin } = await fetchJson(ZEIBAEL_SYSTEM_HEALTH_URL);
+  if (!response.ok) throw new Error(`Health HTTP ${response.status}`);
+  if (!payload || payload.ok !== true) throw new Error('ZEIBAEL health returned ok=false');
+  if (payload.secrets_exposed !== false) throw new Error('Health contract did not assert secrets_exposed=false');
+  if (payload.live_order_enabled !== false) throw new Error('Health contract did not assert live_order_enabled=false');
+  const failed = Array.isArray(payload.checks) ? payload.checks.filter(item => item?.ok !== true) : [];
+  if (failed.length) throw new Error(`ZEIBAEL health has ${failed.length} failed check(s)`);
+  return {
+    origin,
+    service: payload.service,
+    version: payload.version,
+    summary: payload.summary,
+    checks: Array.isArray(payload.checks)
+      ? payload.checks.map(item => ({ name: item.name, ok: item.ok, detail: item.detail }))
+      : [],
+  };
+});
+
+await configuredHttp('target.supabase.custom', 'SUPABASE_HEALTH_URL');
+await configuredHttp('target.convex.custom', 'CONVEX_HEALTH_URL');
+await configuredHttp('target.zeibael_canary.custom', 'ZEIBAEL_CANARY_URL');
 
 const requiredFailures = checks.filter(c => c.required && c.status !== 'PASS');
 const status = requiredFailures.length === 0 ? 'VERIFIED' : 'FAILED';
 const baseEvidence = {
-  schema: 'zeibael.verifier.evidence.v1',
+  schema: 'zeibael.verifier.evidence.v2',
   status,
   generated_at: new Date().toISOString(),
   duration_ms: Date.now() - started,
