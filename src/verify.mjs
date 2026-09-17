@@ -16,14 +16,14 @@ async function check(name, fn, { required = true } = {}) {
     checks.push({
       name,
       required,
-      status: required ? 'FAIL' : 'SKIP',
+      status: 'FAIL',
       duration_ms: Date.now() - t0,
       detail: String(error?.message ?? error),
     });
   }
 }
 
-async function optionalHttp(name, envName) {
+async function configuredHttp(name, envName) {
   const url = process.env[envName];
   if (!url) {
     checks.push({ name, required: false, status: 'SKIP', duration_ms: 0, detail: `${envName} not configured` });
@@ -31,16 +31,18 @@ async function optionalHttp(name, envName) {
   }
 
   await check(name, async () => {
+    const parsed = new URL(url);
+    if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error(`Unsupported protocol: ${parsed.protocol}`);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
     try {
       const response = await fetch(url, { method: 'GET', signal: controller.signal, redirect: 'follow' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return { url: new URL(url).origin, status: response.status };
+      return { origin: parsed.origin, status: response.status };
     } finally {
       clearTimeout(timer);
     }
-  }, { required: false });
+  }, { required: true });
 }
 
 await check('runtime.node', async () => {
@@ -85,9 +87,9 @@ await check('runtime.timer', async () => {
   return { elapsed_ms: elapsed };
 });
 
-await optionalHttp('target.supabase', 'SUPABASE_HEALTH_URL');
-await optionalHttp('target.convex', 'CONVEX_HEALTH_URL');
-await optionalHttp('target.zeibael_canary', 'ZEIBAEL_CANARY_URL');
+await configuredHttp('target.supabase', 'SUPABASE_HEALTH_URL');
+await configuredHttp('target.convex', 'CONVEX_HEALTH_URL');
+await configuredHttp('target.zeibael_canary', 'ZEIBAEL_CANARY_URL');
 
 const requiredFailures = checks.filter(c => c.required && c.status !== 'PASS');
 const status = requiredFailures.length === 0 ? 'VERIFIED' : 'FAILED';
