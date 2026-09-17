@@ -1,0 +1,19 @@
+{
+  "name": "zeibael-blitz-verifier",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Secret-free StackBlitz/WebContainer verification harness for ZEIBAEL",
+  "scripts": {
+    "verify": "node src/verify.mjs",
+    "verify:json": "node src/verify.mjs --json",
+    "test": "node src/verify.mjs --json"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "stackblitz": {
+    "installDependencies": false,
+    "startCommand": "npm run verify"
+  }
+}
