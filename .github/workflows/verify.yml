@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Probe ZEIBAEL health
+      - name: Probe ZEIBAEL health v3
         run: curl -sS https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-blitz-health || true
       - name: Run ZEIBAEL verifier
         run: npm test
