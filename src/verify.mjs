@@ -15,14 +15,17 @@ async function check(name, fn, { required = true } = {}) {
     const detail = await fn();
     checks.push({ name, required, status: 'PASS', duration_ms: Date.now() - t0, detail });
   } catch (error) {
-    checks.push({
-      name,
-      required,
-      status: 'FAIL',
-      duration_ms: Date.now() - t0,
-      detail: String(error?.message ?? error),
-    });
+    const detail = error && typeof error === 'object' && 'zeibaelDetail' in error
+      ? error.zeibaelDetail
+      : String(error?.message ?? error);
+    checks.push({ name, required, status: 'FAIL', duration_ms: Date.now() - t0, detail });
   }
+}
+
+function failWithDetail(message, detail) {
+  const error = new Error(message);
+  error.zeibaelDetail = detail;
+  throw error;
 }
 
 async function fetchJson(url, ms = 10000) {
@@ -102,21 +105,26 @@ await check('runtime.timer', async () => {
 
 await check('zeibael.system_health', async () => {
   const { response, payload, origin } = await fetchJson(ZEIBAEL_SYSTEM_HEALTH_URL);
-  if (!response.ok) throw new Error(`Health HTTP ${response.status}`);
-  if (!payload || payload.ok !== true) throw new Error('ZEIBAEL health returned ok=false');
-  if (payload.secrets_exposed !== false) throw new Error('Health contract did not assert secrets_exposed=false');
-  if (payload.live_order_enabled !== false) throw new Error('Health contract did not assert live_order_enabled=false');
-  const failed = Array.isArray(payload.checks) ? payload.checks.filter(item => item?.ok !== true) : [];
-  if (failed.length) throw new Error(`ZEIBAEL health has ${failed.length} failed check(s)`);
-  return {
+  const systemChecks = Array.isArray(payload?.checks)
+    ? payload.checks.map(item => ({ name: item?.name, ok: item?.ok, required: item?.required, detail: item?.detail }))
+    : [];
+  const failed = systemChecks.filter(item => item.required !== false && item.ok !== true);
+  const safeDetail = {
     origin,
-    service: payload.service,
-    version: payload.version,
-    summary: payload.summary,
-    checks: Array.isArray(payload.checks)
-      ? payload.checks.map(item => ({ name: item.name, ok: item.ok, detail: item.detail }))
-      : [],
+    http_status: response.status,
+    service: payload?.service ?? null,
+    version: payload?.version ?? null,
+    summary: payload?.summary ?? null,
+    failed_checks: failed,
+    checks: systemChecks,
+    secrets_exposed: payload?.secrets_exposed,
+    live_order_enabled: payload?.live_order_enabled,
   };
+  if (!response.ok || payload?.ok !== true) failWithDetail(`ZEIBAEL health HTTP ${response.status}`, safeDetail);
+  if (payload.secrets_exposed !== false) failWithDetail('Health contract did not assert secrets_exposed=false', safeDetail);
+  if (payload.live_order_enabled !== false) failWithDetail('Health contract did not assert live_order_enabled=false', safeDetail);
+  if (failed.length) failWithDetail(`ZEIBAEL health has ${failed.length} failed required check(s)`, safeDetail);
+  return safeDetail;
 });
 
 await configuredHttp('target.supabase.custom', 'SUPABASE_HEALTH_URL');
@@ -126,21 +134,18 @@ await configuredHttp('target.zeibael_canary.custom', 'ZEIBAEL_CANARY_URL');
 const requiredFailures = checks.filter(c => c.required && c.status !== 'PASS');
 const status = requiredFailures.length === 0 ? 'VERIFIED' : 'FAILED';
 const baseEvidence = {
-  schema: 'zeibael.verifier.evidence.v2',
+  schema: 'zeibael.verifier.evidence.v3',
   status,
   generated_at: new Date().toISOString(),
   duration_ms: Date.now() - started,
-  runtime: {
-    node: process.versions.node,
-    platform: process.platform,
-    arch: process.arch,
-  },
+  runtime: { node: process.versions.node, platform: process.platform, arch: process.arch },
   summary: {
     pass: checks.filter(c => c.status === 'PASS').length,
     fail: checks.filter(c => c.status === 'FAIL').length,
     skip: checks.filter(c => c.status === 'SKIP').length,
     required_failures: requiredFailures.length,
   },
+  blockers: requiredFailures.map(c => ({ name: c.name, detail: c.detail })),
   checks,
 };
 
@@ -155,8 +160,10 @@ if (process.argv.includes('--json')) {
 } else {
   console.log('\nZEIBAEL BLITZ VERIFIER');
   console.log('======================');
-  for (const item of checks) {
-    console.log(`${item.status.padEnd(8)} ${item.name} (${item.duration_ms}ms)`);
+  for (const item of checks) console.log(`${item.status.padEnd(8)} ${item.name} (${item.duration_ms}ms)`);
+  if (requiredFailures.length) {
+    console.log('\nBLOCKERS');
+    for (const item of requiredFailures) console.log(`- ${item.name}: ${JSON.stringify(item.detail)}`);
   }
   console.log('----------------------');
   console.log(`STATUS      ${status}`);
