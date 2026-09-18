@@ -8,13 +8,14 @@
     "verify": "node src/verify-max.mjs",
     "verify:json": "node src/verify-max.mjs --json",
     "test": "node src/verify-max.mjs --json",
-    "worker-limit": "node src/worker-limit.mjs"
+    "worker-limit": "node src/worker-limit.mjs",
+    "capacity:webcontainer": "node src/webcontainer-capacity.mjs"
   },
   "engines": {
     "node": ">=18"
   },
   "stackblitz": {
     "installDependencies": false,
-    "startCommand": "npm run verify"
+    "startCommand": "npm run capacity:webcontainer"
   }
 }
