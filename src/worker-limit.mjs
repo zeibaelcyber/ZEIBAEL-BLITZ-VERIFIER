@@ -1,8 +1,8 @@
 import { Worker } from "node:worker_threads";
 
 const ENDPOINT = "https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-blitz-worker-evidence";
-const MAX_WORKERS = 700;
-const EXACT_FROM = 385;
+const MAX_WORKERS = 3000;
+const EXACT_FROM = 701;
 const READY_TIMEOUT_MS = 5000;
 const STABILITY_MS = 25;
 const benchmarkId = `blitz-worker-limit-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
