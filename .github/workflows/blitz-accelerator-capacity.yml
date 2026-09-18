@@ -1,10 +1,6 @@
 name: ZEIBAEL Blitz Accelerator Capacity
 
 on:
-  push:
-    paths:
-      - 'scripts/blitz-accelerator-capacity.mjs'
-      - '.github/workflows/blitz-accelerator-capacity.yml'
   workflow_dispatch:
 
 permissions:
