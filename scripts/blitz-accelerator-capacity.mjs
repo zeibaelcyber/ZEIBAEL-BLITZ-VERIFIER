@@ -9,7 +9,7 @@ const CANDIDATES = [1,2,4,8,16,24,32,48,64,96,128,192,256,384,512,768,1024,1280,
 const html = `<!doctype html><meta charset="utf-8"><title>ZEIBAEL Blitz Adaptive Capacity</title>
 <pre id="status">BOOTING</pre>
 <script type="module">
-import { WebContainer } from "https://esm.sh/@webcontainer/api@1.6.4";
+import { WebContainer } from "https://esm.run/@webcontainer/api@1.6.4";
 const status = document.getElementById("status");
 window.__bootDiag = {
   coi: globalThis.crossOriginIsolated === true,
