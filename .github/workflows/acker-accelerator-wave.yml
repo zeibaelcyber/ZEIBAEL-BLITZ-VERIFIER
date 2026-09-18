@@ -1,0 +1,32 @@
+name: ZEIBAEL Acker Accelerator Wave
+
+on:
+  push:
+    paths:
+      - 'scripts/blitz-accelerator-probe.mjs'
+      - '.github/workflows/acker-accelerator-wave.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        candidate: [16,24,32,48,64,96,128,192,256,384,512]
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CANDIDATE: ${{ matrix.candidate }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install browser harness
+        run: npm install --no-save --no-package-lock puppeteer@24.16.0
+      - name: Run accelerator probe
+        run: node scripts/blitz-accelerator-probe.mjs
