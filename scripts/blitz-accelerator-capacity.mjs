@@ -165,7 +165,7 @@ try{
     if(String(diag.status||"").startsWith("BOOT_ERROR:"))break;
     await new Promise(r=>setTimeout(r,250));
   }
-  console.log("ZEIBAEL_ACCELERATOR_STARTUP="+JSON.stringify({...diag,browserEvents:browserEvents.slice(-40)}));
+  console.log("ZEIBAEL_ACCELERATOR_STARTUP="+JSON.stringify({...diag,browser_diagnostics:browserDiagnostics.slice(-80)}));
   if(!(diag?.status==="READY"&&diag?.coi&&diag?.sab&&diag?.secure&&diag?.hasRun)){
     console.log("ZEIBAEL_ACCELERATOR_RESULT="+JSON.stringify({
       schema:"zeibael.blitz.accelerator-capacity.v3",
