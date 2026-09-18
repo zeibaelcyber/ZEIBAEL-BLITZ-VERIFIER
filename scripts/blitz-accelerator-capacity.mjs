@@ -10,7 +10,7 @@ const CANDIDATES = [1,2,4,8,16,24,32,48,64,96,128,192,256,384,512,768,1024,1280,
 const html = `<!doctype html><meta charset="utf-8"><title>ZEIBAEL Blitz Adaptive Capacity</title>
 <pre id="status">BOOTING</pre>
 <script type="module">
-import { WebContainer } from "https://esm.run/@webcontainer/api@1.6.4";
+import { WebContainer } from "/wc/index.js";
 const status = document.getElementById("status");
 window.__bootDiag = {
   coi: globalThis.crossOriginIsolated === true,
@@ -67,13 +67,30 @@ try{
 }
 </script>`;
 
-const server=http.createServer((req,res)=>{
-  res.setHeader("content-type","text/html; charset=utf-8");
-  res.setHeader("cache-control","no-store");
-  res.setHeader("Cross-Origin-Opener-Policy","same-origin");
-  res.setHeader("Cross-Origin-Embedder-Policy","credentialless");
-  res.setHeader("Cross-Origin-Resource-Policy","same-origin");
-  res.end(html);
+const server=http.createServer(async(req,res)=>{
+  try{
+    const url=new URL(req.url||"/","http://127.0.0.1:"+PORT);
+    res.setHeader("cache-control","no-store");
+    res.setHeader("Cross-Origin-Opener-Policy","same-origin");
+    res.setHeader("Cross-Origin-Embedder-Policy","credentialless");
+    res.setHeader("Cross-Origin-Resource-Policy","same-origin");
+    if(url.pathname.startsWith("/wc/")){
+      const rel=url.pathname.slice("/wc/".length);
+      const full=path.resolve(WC_DIST,rel);
+      if(!full.startsWith(WC_DIST+path.sep) && full!==path.join(WC_DIST,rel)){
+        res.writeHead(403); res.end("forbidden"); return;
+      }
+      const body=await fs.readFile(full);
+      res.setHeader("content-type",rel.endsWith(".js")?"text/javascript; charset=utf-8":"application/octet-stream");
+      res.end(body);
+      return;
+    }
+    res.setHeader("content-type","text/html; charset=utf-8");
+    res.end(html);
+  }catch(e){
+    res.writeHead(500,{"content-type":"text/plain; charset=utf-8"});
+    res.end(String(e?.message||e));
+  }
 });
 await new Promise(r=>server.listen(PORT,"127.0.0.1",r));
 
