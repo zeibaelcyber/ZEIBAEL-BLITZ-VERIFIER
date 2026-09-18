@@ -1,53 +1,51 @@
 # ZEIBAEL Blitz Capability Map v1
 
-Purpose: measure the usable concurrency envelope of a StackBlitz/WebContainer session without pretending there is one universal StackBlitz worker limit.
+Purpose: record the proven concurrency envelope of Blitz and provide an upper capability reference for real execution.
 
-## Operating model
+## Canonical proven benchmark reference
 
-Each benchmark profile produces three values:
+Exact worker-limit benchmark:
 
-- `burst_max`: highest concurrency that completes inside the profile timeout.
-- `first_fail`: first adjacent concurrency that fails or times out.
-- `safe_max`: conservative operating ceiling used for real work.
+- benchmark id: `blitz-worker-limit-1789702096605-6evpmf`
+- status: `EXACT_BOUNDARY_OBSERVED`
+- max stable workers: `1791`
+- first failed worker: `1792`
+- first failure: `ready_timeout`
 
-A boundary is `EXACT` only when `N` passes and `N+1` fails in two confirmation rounds in the same environment/session.
+This establishes **1791 as the proven maximum stable capability for that benchmark profile**.
 
-## Profiles
+It is not a mandatory worker count for every real task.
 
-1. `LIGHT` — tiny Node processes: arithmetic, hashing, JSON.
-2. `IO` — filesystem/read-write/process-output workload inside the WebContainer.
-3. `BUILD_TEST` — syntax-check / module-load / test-like process workload.
-4. `CPU_HEAVY` — sustained compute loop + crypto.
+## Real-work operating model
 
-## Search algorithm
+Real Blitz work must use **as much concurrency as the actual workload can sustain stably**, bounded by the latest proven benchmark ceiling.
 
-1. Probe 1, 2, 4, 8, 16... until the first failure or profile cap.
-2. Binary-search between the last pass and first fail.
-3. Confirm `N PASS` and `N+1 FAIL` twice.
-4. If the two confirmation rounds disagree, mark the profile `VARIABLE` and use the minimum observed stable boundary for safe planning.
+Examples:
+- workload stable at 1000 -> use up to 1000;
+- workload stable at 600 -> use up to 600;
+- only 75 independent work units exist -> run those 75 concurrently;
+- do not manufacture workers merely to reach 1791;
+- do not force a workload past its stable point just because the benchmark ceiling is higher.
 
-## Safety policy
+## Execution rules
 
-This map is manual. It does not auto-trigger workers, deployment, trading, or production writes.
+1. Maximize real usage; do not intentionally underuse Blitz when independent work is available.
+2. Keep execution stable; the operating point is the highest level that remains reliable for the actual workload.
+3. Do not use conservative percentage derating.
+4. Do not impose an arbitrary low worker cap.
+5. Do not reserve idle workers while ready work exists.
+6. Start independent work together up to the stable workload capacity.
+7. Start dependent work as soon as dependencies pass.
+8. Failure in one scope must not stop unrelated work; retry only the failed scope.
+9. Reuse existing benchmark knowledge. Do not re-run the benchmark from zero merely because a new chat, plugin, wave, or task begins.
+10. Do not exceed the latest proven benchmark ceiling without new evidence.
+11. If later benchmark evidence proves a higher stable ceiling, adopt the higher proven value.
+12. Zero-spend and no-secret rules remain mandatory.
 
-Default safe ceilings:
-- LIGHT: 80% of burst_max
-- IO: 75%
-- BUILD_TEST: 70%
-- CPU_HEAVY: 60%
+## Evidence semantics
 
-The percentages are intentionally conservative and can be revised after repeated evidence on the user's primary device.
+A benchmark result is authoritative only for what it actually tested. The 1791/1792 result is the upper capability reference from the exact worker-limit benchmark. Real workloads may reach a lower stable operating point depending on task shape, memory, I/O, CPU pressure, or runtime conditions.
 
-## Environment fingerprint
+The goal is therefore:
 
-Every map records browser user-agent, logical CPU count, reported device memory when available, cross-origin isolation, timestamp, and WebContainer API version.
-
-Do not compare two maps as if they were identical unless their environment fingerprints and benchmark profile versions match.
-
-## Lab v2 integration
-
-ZEIBAEL Blitz Lab v2 should read this map as a capability contract:
-
-- NORMAL mode uses `safe_max`.
-- BURST mode may use up to `burst_max` only when the user explicitly requests it.
-- REDLINE is `first_fail` and is never used for real work.
+**MAXIMUM PRACTICAL STABLE UTILIZATION**, not maximum worker count at any cost.
