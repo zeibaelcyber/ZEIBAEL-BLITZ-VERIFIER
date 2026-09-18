@@ -9,13 +9,14 @@
     "verify:json": "node src/verify-max.mjs --json",
     "test": "node src/verify-max.mjs --json",
     "worker-limit": "node src/worker-limit.mjs",
-    "capacity:webcontainer": "node src/webcontainer-capacity.mjs"
+    "capacity:webcontainer": "node src/webcontainer-capacity.mjs",
+    "verify:pr92": "node src/pr92-migration-reconcile.mjs"
   },
   "engines": {
     "node": ">=18"
   },
   "stackblitz": {
     "installDependencies": false,
-    "startCommand": "npm run capacity:webcontainer"
+    "startCommand": "npm run verify:pr92"
   }
 }
