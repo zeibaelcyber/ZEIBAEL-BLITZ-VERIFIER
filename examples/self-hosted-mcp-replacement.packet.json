@@ -1,0 +1,111 @@
+{
+  "task_id": "self-hosted-mcp-replacement-2026-09-18",
+  "objective": "Select a self-hosted vendor-unmetered MCP runtime fabric to replace Vercel and Hatchable while keeping Blitz primary",
+  "constraints": {
+    "zero_spend_first": true,
+    "paid_fallback_allowed": false,
+    "vendor_metered_runtime_forbidden": true,
+    "blitz_primary": true,
+    "live_order_enabled": false,
+    "self_host_preferred": true
+  },
+  "candidates": [
+    {
+      "id": "docker_gateway",
+      "repo": "docker/mcp-gateway",
+      "role": "MCP_GATEWAY",
+      "vendor_metered": false,
+      "features": [
+        "isolated MCP containers",
+        "streaming HTTP",
+        "multi-client",
+        "secrets",
+        "OAuth",
+        "dynamic discovery",
+        "logging"
+      ]
+    },
+    {
+      "id": "podman_mcp",
+      "repo": "manusa/podman-mcp-server",
+      "role": "CONTAINER_RUNTIME",
+      "vendor_metered": false,
+      "features": [
+        "Podman/Docker",
+        "run containers",
+        "build/pull/push images",
+        "ports",
+        "logs",
+        "rootless socket support"
+      ]
+    },
+    {
+      "id": "playwright_mcp",
+      "repo": "microsoft/playwright-mcp",
+      "role": "BROWSER_RUNTIME",
+      "vendor_metered": false,
+      "features": [
+        "browser automation",
+        "persistent profiles",
+        "headless",
+        "Chrome/Firefox/WebKit/Edge"
+      ]
+    },
+    {
+      "id": "aio_sandbox",
+      "repo": "agent-infra/sandbox",
+      "role": "HEAVY_ALL_IN_ONE",
+      "vendor_metered": false,
+      "features": [
+        "browser",
+        "shell",
+        "file",
+        "VSCode",
+        "Jupyter",
+        "MCP",
+        "persistent volume",
+        "port forwarding"
+      ],
+      "caveat": "seccomp=unconfined; examples request 1Gi and limit 2Gi memory"
+    },
+    {
+      "id": "kubernetes_mcp",
+      "repo": "containers/kubernetes-mcp-server",
+      "role": "MAX_SCALE_ORCHESTRATOR",
+      "vendor_metered": false,
+      "features": [
+        "pods",
+        "exec",
+        "logs",
+        "run/expose image",
+        "Helm",
+        "multi-cluster",
+        "KubeVirt",
+        "observability"
+      ],
+      "caveat": "higher operational/resource overhead"
+    },
+    {
+      "id": "daytona",
+      "repo": "daytonaio/daytona",
+      "role": "HOSTED_SANDBOX",
+      "vendor_metered": true,
+      "caveat": "API-key cloud path exposes limits/billing; not unlimited"
+    }
+  ],
+  "decision": {
+    "practical_primary": [
+      "docker/mcp-gateway",
+      "manusa/podman-mcp-server",
+      "microsoft/playwright-mcp"
+    ],
+    "optional_heavy_worker": "agent-infra/sandbox",
+    "future_scale": "containers/kubernetes-mcp-server",
+    "reject_for_unlimited": [
+      "daytonaio/daytona",
+      "Vercel",
+      "Hatchable",
+      "Railway"
+    ]
+  }
+}
