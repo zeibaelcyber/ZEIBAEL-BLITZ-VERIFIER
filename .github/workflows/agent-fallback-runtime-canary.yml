@@ -15,7 +15,7 @@ permissions:
 jobs:
   openclaw:
     name: OpenClaw fresh zero-spend runtime
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'ci: add parallel Hermes OpenClaw runtime canaries'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
