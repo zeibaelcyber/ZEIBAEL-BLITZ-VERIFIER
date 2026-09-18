@@ -28,6 +28,22 @@ assert.equal(compiled.priorityById.fetch_a.critical_depth, 1);
 assert.equal(compiled.priorityById.fetch_b.critical_depth, 1);
 assert.equal(compiled.priorityById.join.critical_depth, 0);
 
+const sideEffects = compileSmartPacket({
+  task_id: "side-effects",
+  jobs: [
+    { id: "cmd_a", type: "command", command: "echo same" },
+    { id: "cmd_b", type: "command", command: "echo same" }
+  ]
+});
+assert.equal(sideEffects.diagnostics.executable_jobs, 2);
+assert.equal(sideEffects.diagnostics.duplicates_removed, 0);
+
+assert.throws(() => compileSmartPacket({
+  task_id: "live-order",
+  live_order_enabled: true,
+  jobs: [{ id: "a", type: "inline", code: "return 1" }]
+}), /BLITZ_LIVE_ORDER_FORBIDDEN/);
+
 assert.throws(() => compileSmartPacket({
   task_id: "cycle",
   jobs: [
