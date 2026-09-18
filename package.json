@@ -15,6 +15,6 @@
   },
   "stackblitz": {
     "installDependencies": false,
-    "startCommand": "npm run verify"
+    "startCommand": "npm run worker-limit"
   }
 }
