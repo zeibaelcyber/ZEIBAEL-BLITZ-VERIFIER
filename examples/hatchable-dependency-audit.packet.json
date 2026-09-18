@@ -1,0 +1,55 @@
+{
+  "task_id": "hatchable-dependency-deep-audit-2026-09-18",
+  "objective": "Audit whether Hatchable is a single point of failure for ZEIBAEL Blitz and classify zero-spend mitigations.",
+  "jobs": [
+    {
+      "id": "j1",
+      "type": "inline",
+      "code": "return {risk:'SPOF',finding:'If Blitz can only be reached through Hatchable browser bridge, Hatchable quota/session failure disables that access path even if StackBlitz itself is healthy.',severity:'HIGH'};"
+    },
+    {
+      "id": "j2",
+      "type": "inline",
+      "code": "return {risk:'QUOTA_VISIBILITY',finding:'Unknown remaining quota is operational risk; health must infer from 429 quota_exceeded plus usage telemetry until exact balance surface exists.',severity:'MEDIUM'};"
+    },
+    {
+      "id": "j3",
+      "type": "inline",
+      "code": "return {risk:'ERROR_CLASSIFICATION',finding:'502 bridge failures must not be treated as quota exhaustion; 429 quota_exceeded is the quota signal.',severity:'HIGH'};"
+    },
+    {
+      "id": "j4",
+      "type": "inline",
+      "code": "return {risk:'DECOUPLING',finding:'Blitz task packets and GitHub verifier must remain independent of Hatchable so alternate browser/StackBlitz access can reuse the same work.',severity:'HIGH'};"
+    },
+    {
+      "id": "j5",
+      "type": "inline",
+      "code": "return {mitigation:'MULTI_BRIDGE',finding:'Maintain at least two independently testable zero-spend routes to StackBlitz/WebContainer; Hatchable must be one bridge, not authority.',priority:1};"
+    },
+    {
+      "id": "j6",
+      "type": "inline",
+      "code": "return {mitigation:'WATCHDOG',finding:'Record bridge health by status class, consecutive failures, 429 resets, and last successful StackBlitz evidence.',priority:2};"
+    },
+    {
+      "id": "j7",
+      "type": "inline",
+      "code": "return {mitigation:'CACHE_REUSE',finding:'Reuse already-verified GitHub commit evidence and avoid repeated browser boots when runtime revalidation is unnecessary.',priority:3};"
+    },
+    {
+      "id": "final",
+      "type": "inline",
+      "depends_on": [
+        "j1",
+        "j2",
+        "j3",
+        "j4",
+        "j5",
+        "j6",
+        "j7"
+      ],
+      "code": "return {schema:'zeibael.hatchable_dependency_audit.blitz.v1',status:'VERIFIED',conclusion:'Hatchable should be treated as a replaceable bridge, never as Blitz itself or the sole control path.',jobs:7};"
+    }
+  ]
+}
