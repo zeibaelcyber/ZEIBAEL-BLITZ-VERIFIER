@@ -1,0 +1,25 @@
+name: ZEIBAEL Blitz Accelerator Capacity
+
+on:
+  push:
+    paths:
+      - 'scripts/blitz-accelerator-capacity.mjs'
+      - '.github/workflows/blitz-accelerator-capacity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  accelerator-capacity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install browser harness
+        run: npm install --no-save --no-package-lock puppeteer@24.16.0
+      - name: Find exact max non-timeout accelerator slots
+        run: node scripts/blitz-accelerator-capacity.mjs
