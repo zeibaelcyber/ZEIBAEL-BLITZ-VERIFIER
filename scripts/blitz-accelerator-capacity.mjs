@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WC_DIST = path.resolve(__dirname, "../node_modules/@webcontainer/api/dist");
 
 const PORT = 4182;
-const STARTUP_TIMEOUT_MS = 60000;
+const STARTUP_TIMEOUT_MS = 30000;
 const STEP_TIMEOUT_MS = 30000;
 const CANDIDATES = [1,2,4,8,16,24,32,48,64,96,128,192,256,384,512,768,1024,1280,1536,1791];
 
