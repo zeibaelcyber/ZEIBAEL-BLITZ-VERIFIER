@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent-fallback-runtime-canary-v1
+      - main
     paths:
       - '.github/workflows/agent-fallback-runtime-canary.yml'
       - 'scripts/hermes-local-provider-stub.py'
@@ -19,7 +20,7 @@ concurrency:
 jobs:
   openclaw:
     name: OpenClaw fresh zero-spend runtime
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
