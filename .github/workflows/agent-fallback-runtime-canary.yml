@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: zeibael-agent-fallback-runtime-canary
+  cancel-in-progress: true
+
 jobs:
   openclaw:
     name: OpenClaw fresh zero-spend runtime
@@ -106,12 +110,22 @@ jobs:
           unset HERMES_YOLO_MODE || true
           unset HERMES_ACCEPT_HOOKS || true
           mkdir -p "$HERMES_HOME"
+          touch "$HERMES_HOME/.no-bundled-skills"
+          cat >"$HERMES_HOME/config.yaml" <<'YAML'
+          model:
+            default: canary-model
+            provider: custom
+            base_url: http://127.0.0.1:18765/v1
+            api_mode: chat_completions
+            api_key: no-key-required
+          fallback_providers: []
+          YAML
 
           test -z "${HERMES_YOLO_MODE:-}"
           test -z "${HERMES_ACCEPT_HOOKS:-}"
           command -v script >/dev/null
 
-          script -qec 'test -t 0 && test -t 1 && hermes chat --provider custom --model canary-model -q "Return exactly ZEIBAEL_HERMES_CANARY_PASS and nothing else."' "$RUNNER_TEMP/hermes-session.log"
+          timeout 90s script -qec 'test -t 0 && test -t 1 && hermes chat --query "Return exactly ZEIBAEL_HERMES_CANARY_PASS and nothing else." --provider custom --model canary-model --quiet --max-turns 1' "$RUNNER_TEMP/hermes-session.log"
 
           grep -F 'ZEIBAEL_HERMES_CANARY_PASS' "$RUNNER_TEMP/hermes-session.log" >/dev/null
           ! grep -F '⚠ YOLO' "$RUNNER_TEMP/hermes-session.log" >/dev/null
