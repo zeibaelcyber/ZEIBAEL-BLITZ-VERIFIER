@@ -23,7 +23,6 @@ const CONFIRM_ROUNDS = 2;
 const statusEl=document.getElementById('status');
 const resultEl=document.getElementById('result');
 window.__done=false; window.__result=null;
-let wc=null;
 
 async function collect(proc){let out='';const r=proc.output.getReader();for(;;){const x=await r.read();if(x.done)break;out+=x.value;if(out.length>4096)out=out.slice(-4096)}return out}
 function taskCode(profile,i){
@@ -32,48 +31,60 @@ function taskCode(profile,i){
   if(profile==='BUILD_TEST') return 'import fs from "node:fs";import {spawnSync} from "node:child_process";const p="/tmp/m-'+i+'-"+process.pid+".mjs";fs.writeFileSync(p,"export const x="+('+i+'+1)+";");const r=spawnSync(process.execPath,["--check",p],{stdio:"pipe"});fs.unlinkSync(p);if(r.status!==0){console.error(String(r.stderr||""));process.exit(1)}console.log("ok")';
   return 'import crypto from "node:crypto";let x='+i+';for(let j=0;j<3500000;j++)x=(x+j)%1000000007;const h=crypto.createHash("sha256").update(String(x)).digest("hex");if(h.length!==64)process.exit(1);console.log("ok")';
 }
-async function boot(){
-  wc=await WebContainer.boot({coep:'credentialless'});
-  await wc.fs.writeFile('/package.json',JSON.stringify({name:'zeibael-capability-map',version:'1.0.0',private:true,type:'module'}));
-}
 async function runCandidate(profile,c,timeoutMs){
   const taskCount=Math.max(c*2,8);
   const prefix='cap-'+profile.toLowerCase()+'-'+Date.now()+'-'+Math.random().toString(36).slice(2)+'-';
-  for(let i=0;i<taskCount;i++) await wc.fs.writeFile(prefix+i+'.mjs',taskCode(profile,i));
+  let localWc=null;
+  try{
+    localWc=await WebContainer.boot({coep:'credentialless'});
+    await localWc.fs.writeFile('/package.json',JSON.stringify({name:'zeibael-capability-map',version:'1.0.0',private:true,type:'module'}));
+    for(let i=0;i<taskCount;i++) await localWc.fs.writeFile(prefix+i+'.mjs',taskCode(profile,i));
+  }catch(e){
+    try{localWc?.teardown()}catch{}
+    return {candidate:c,ok:false,timeout:false,stage:'setup',elapsed_ms:0,completed:0,failed:0,tasks:taskCount,error:String(e?.message||e),samples:[]};
+  }
+
   let cursor=0,completed=0,failed=0;
   const samples=[];
   const started=performance.now();
+
   async function worker(){
     for(;;){
       const i=cursor++;
       if(i>=taskCount)return;
       try{
-        const p=await wc.spawn('node',[prefix+i+'.mjs']);
+        const p=await localWc.spawn('node',[prefix+i+'.mjs']);
         const output=await collect(p);
         const code=await p.exit;
         completed++;
         if(code!==0){
           failed++;
-          if(samples.length<3)samples.push({i,code,output:output.slice(-1200),path:prefix+i+'.mjs',source:taskCode(profile,i)});
+          if(samples.length<3)samples.push({i,code,output:output.slice(-1200),path:prefix+i+'.mjs'});
         }
       }catch(e){
         completed++;failed++;
-        if(samples.length<3)samples.push({i,error:String(e?.stack||e),path:prefix+i+'.mjs',source:taskCode(profile,i)});
+        if(samples.length<3)samples.push({i,error:String(e?.stack||e),path:prefix+i+'.mjs'});
       }
     }
   }
+
   let timer;
+  let result;
   try{
     await Promise.race([
       Promise.all(Array.from({length:Math.min(c,taskCount)},worker)),
       new Promise((_,rej)=>timer=setTimeout(()=>rej(new Error('STEP_TIMEOUT')),timeoutMs))
     ]);
     clearTimeout(timer);
-    return {candidate:c,ok:failed===0&&completed===taskCount,timeout:false,elapsed_ms:Math.round(performance.now()-started),completed,failed,tasks:taskCount,samples};
+    result={candidate:c,ok:failed===0&&completed===taskCount,timeout:false,elapsed_ms:Math.round(performance.now()-started),completed,failed,tasks:taskCount,samples};
   }catch(e){
     clearTimeout(timer);
-    return {candidate:c,ok:false,timeout:String(e?.message||e)==='STEP_TIMEOUT',elapsed_ms:Math.round(performance.now()-started),completed,failed,tasks:taskCount,error:String(e?.message||e),samples};
+    result={candidate:c,ok:false,timeout:String(e?.message||e)==='STEP_TIMEOUT',elapsed_ms:Math.round(performance.now()-started),completed,failed,tasks:taskCount,error:String(e?.message||e),samples};
+  }finally{
+    try{localWc?.teardown()}catch{}
   }
+  await new Promise(r=>setTimeout(r,250));
+  return result;
 }
 async function mapBoundary(profile,cfg){
   const probes=[];let low=0,high=null,c=1;
@@ -102,7 +113,6 @@ async function mapBoundary(profile,cfg){
 }
 async function main(){
   const env={generated_at:new Date().toISOString(),ua:navigator.userAgent,hardware_concurrency:navigator.hardwareConcurrency||null,device_memory_gb:navigator.deviceMemory||null,cross_origin_isolated:self.crossOriginIsolated,shared_array_buffer:typeof SharedArrayBuffer,webcontainer_api:'1.6.4'};
-  await boot();
   const profiles={};
   for(const [name,cfg] of Object.entries(PROFILE_CONFIG)) profiles[name]=await mapBoundary(name,cfg);
   window.__result={schema:'zeibael.blitz.capability-map.v1',manual_only:true,environment:env,profiles,policy:{normal_mode:'use safe_max',burst_mode:'use burst_max only on explicit user request',redline:'never schedule first_fail for real work'}};
