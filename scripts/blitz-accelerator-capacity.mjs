@@ -1,5 +1,6 @@
 import http from "node:http";
-import puppeteer from "puppeteer";
+import chromium from "@sparticuz/chromium";
+import puppeteer from "puppeteer-core";
 
 const PORT = 4182;
 const STARTUP_TIMEOUT_MS = 60000;
@@ -80,15 +81,15 @@ function buildArgs(){
   const blockedExact=new Set(["--disable-site-isolation-trials","--disable-web-security","--single-process"]);
   const blockedFeatures=new Set(["IsolateOrigins","site-per-process","ProcessPerSiteUpToMainFrameThreshold","IsolateSandboxedIframes"]);
   const args=[]; const enable=new Set();
-  for(const arg of puppeteer.defaultArgs({headless:true})){
+  for(const arg of chromium.args){
     if(blockedExact.has(arg))continue;
     if(arg.startsWith("--disable-features=")){
-      const kept=arg.slice(19).split(",").filter(Boolean).filter(x=>!blockedFeatures.has(x));
+      const kept=arg.slice("--disable-features=".length).split(",").filter(Boolean).filter(x=>!blockedFeatures.has(x));
       if(kept.length)args.push("--disable-features="+kept.join(","));
       continue;
     }
     if(arg.startsWith("--enable-features=")){
-      for(const x of arg.slice(18).split(","))if(x)enable.add(x);
+      for(const x of arg.slice("--enable-features=".length).split(","))if(x)enable.add(x);
       continue;
     }
     args.push(arg);
@@ -96,14 +97,13 @@ function buildArgs(){
   enable.add("SharedArrayBuffer");
   enable.add("SiteIsolationForCrossOriginOpenerPolicy");
   args.push("--enable-features="+[...enable].join(","));
-  args.push("--site-per-process","--isolate-origins=http://127.0.0.1:"+PORT,"--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage");
+  args.push("--site-per-process","--isolate-origins=http://127.0.0.1:"+PORT);
   return [...new Set(args)];
 }
 
 const browser=await puppeteer.launch({
   headless:true,
-  executablePath:puppeteer.executablePath(),
-  ignoreDefaultArgs:true,
+  executablePath:await chromium.executablePath(),
   args:buildArgs()
 });
 const page=await browser.newPage();
