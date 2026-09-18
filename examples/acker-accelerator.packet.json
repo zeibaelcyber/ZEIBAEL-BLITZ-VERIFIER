@@ -1,0 +1,30 @@
+{
+  "task_id": "sample-compare-3-options",
+  "objective": "Run independent evidence checks in parallel for Acker/Sol",
+  "jobs": [
+    {
+      "id": "option_a",
+      "type": "inline",
+      "code": "return {option:'A',value:21*2}"
+    },
+    {
+      "id": "option_b",
+      "type": "inline",
+      "code": "return {option:'B',value:40+2}"
+    },
+    {
+      "id": "option_c",
+      "type": "command",
+      "command": "node -e \"console.log(JSON.stringify({option:'C',value:42}))\""
+    },
+    {
+      "id": "after_ab",
+      "type": "inline",
+      "depends_on": [
+        "option_a",
+        "option_b"
+      ],
+      "code": "return {stage:'dependent-check',ok:true}"
+    }
+  ]
+}
