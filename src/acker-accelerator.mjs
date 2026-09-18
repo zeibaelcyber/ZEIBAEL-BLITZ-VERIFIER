@@ -13,7 +13,7 @@ const byId = new Map(jobs.map(j => [j.id, j]));
 const state = new Map();
 const startedAt = Date.now();
 const WORKER_THREAD_CEILING = 1791;
-const requestedConcurrency = Number(packet.max_concurrency ?? packet.concurrency ?? jobs.length || 1);
+const requestedConcurrency = Number(packet.max_concurrency ?? packet.concurrency ?? jobs.length);
 const maxConcurrency =
   Number.isFinite(requestedConcurrency) && requestedConcurrency >= 1
     ? Math.min(WORKER_THREAD_CEILING, Math.floor(requestedConcurrency))
