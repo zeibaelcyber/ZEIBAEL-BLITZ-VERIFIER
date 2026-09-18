@@ -1,0 +1,143 @@
+name: ZEIBAEL Agent Fallback Runtime Canary
+
+on:
+  push:
+    branches:
+      - agent-fallback-runtime-canary-v1
+    paths:
+      - '.github/workflows/agent-fallback-runtime-canary.yml'
+      - 'scripts/hermes-local-provider-stub.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  openclaw:
+    name: OpenClaw fresh zero-spend runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Verify exact package and runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -p 'Number(process.versions.node.split(".")[0])')" -ge 22
+          version="$(npm view openclaw@2026.6.35 version)"
+          test "$version" = "2026.6.35"
+
+          runtime_out="$(npx --yes --package=openclaw@2026.6.35 -- openclaw --version 2>&1)"
+          printf '%s\n' "$runtime_out"
+          printf '%s' "$runtime_out" | grep -F '2026.6.35' >/dev/null
+
+          help_out="$(npx --yes --package=openclaw@2026.6.35 -- openclaw --help 2>&1)"
+          printf '%s\n' "$help_out" | head -80
+          printf '%s' "$help_out" | grep -Ei 'gateway|config|doctor|sandbox' >/dev/null
+
+          python - <<'PY'
+          import json
+          print("ZEIBAEL_OPENCLAW_CANARY=" + json.dumps({
+              "status": "PASS",
+              "version": "2026.6.35",
+              "runtime": "GITHUB_ACTIONS_PUBLIC_ZERO_SPEND",
+              "provider_call": False,
+              "secrets_required": False,
+              "live_order_enabled": False,
+              "scheduler_owner_changed": False,
+              "canonical_memory_owner_changed": False
+          }, separators=(",", ":")))
+          PY
+
+  hermes:
+    name: Hermes fresh local-stub agent runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install exact Hermes tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v2026.9.11 https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent"
+          python -m pip install --upgrade pip
+          python -m pip install "$RUNNER_TEMP/hermes-agent"
+          hermes --version | tee "$RUNNER_TEMP/hermes-version.txt"
+          grep -E '0\.21\.2|2026\.9\.11' "$RUNNER_TEMP/hermes-version.txt" >/dev/null
+
+      - name: Start zero-spend local OpenAI-compatible stub
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HERMES_CANARY_PORT=18765
+          python scripts/hermes-local-provider-stub.py >"$RUNNER_TEMP/hermes-stub.log" 2>&1 &
+          echo $! >"$RUNNER_TEMP/hermes-stub.pid"
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18765/v1/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/hermes-stub.log"
+          exit 1
+
+      - name: Run real Hermes agent turn in pseudo-TTY
+        shell: bash
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-home
+          OPENAI_BASE_URL: http://127.0.0.1:18765/v1
+          OPENAI_API_KEY: zeibael-local-canary-not-a-secret
+          HERMES_INFERENCE_PROVIDER: custom
+          HERMES_INFERENCE_MODEL: canary-model
+          NO_PROXY: 127.0.0.1,localhost
+        run: |
+          set -euo pipefail
+          unset HERMES_YOLO_MODE || true
+          unset HERMES_ACCEPT_HOOKS || true
+          mkdir -p "$HERMES_HOME"
+
+          test -z "${HERMES_YOLO_MODE:-}"
+          test -z "${HERMES_ACCEPT_HOOKS:-}"
+          command -v script >/dev/null
+
+          script -qec 'test -t 0 && test -t 1 && hermes chat --provider custom --model canary-model -q "Return exactly ZEIBAEL_HERMES_CANARY_PASS and nothing else."' "$RUNNER_TEMP/hermes-session.log"
+
+          grep -F 'ZEIBAEL_HERMES_CANARY_PASS' "$RUNNER_TEMP/hermes-session.log" >/dev/null
+          ! grep -F '⚠ YOLO' "$RUNNER_TEMP/hermes-session.log" >/dev/null
+
+          python - <<'PY'
+          import json, os
+          print("ZEIBAEL_HERMES_CANARY=" + json.dumps({
+              "status": "PASS",
+              "version": "0.21.2",
+              "source_tag": "v2026.9.11",
+              "runtime": "GITHUB_ACTIONS_PUBLIC_ZERO_SPEND",
+              "local_stub_provider": True,
+              "pseudo_tty": True,
+              "yolo_mode": False,
+              "external_provider_call": False,
+              "production_credentials_mounted": False,
+              "live_order_enabled": False,
+              "scheduler_owner_changed": False,
+              "canonical_memory_owner_changed": False
+          }, separators=(",", ":")))
+          PY
+
+      - name: Stop local stub
+        if: always()
+        shell: bash
+        run: |
+          if test -f "$RUNNER_TEMP/hermes-stub.pid"; then
+            kill "$(cat "$RUNNER_TEMP/hermes-stub.pid")" 2>/dev/null || true
+          fi
+          tail -100 "$RUNNER_TEMP/hermes-stub.log" 2>/dev/null || true
