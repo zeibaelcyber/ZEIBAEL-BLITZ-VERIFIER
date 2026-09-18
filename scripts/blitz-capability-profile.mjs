@@ -40,7 +40,8 @@ async function runCandidate(c){
   await wc.fs.writeFile('/package.json',JSON.stringify({name:'zeibael-capability',version:'1.0.0',private:true,type:'module'}));
   for(let i=0;i<taskCount;i++)await wc.fs.writeFile('/t-'+i+'.mjs',codeFor(i));
   let cursor=0,completed=0,failed=0;
-  async function worker(){for(;;){const i=cursor++;if(i>=taskCount)return;try{const pr=await wc.spawn('node',['/t-'+i+'.mjs']);await collect(pr);const ec=await pr.exit;completed++;if(ec!==0)failed++}catch{completed++;failed++}}}
+  const samples=[];
+  async function worker(){for(;;){const i=cursor++;if(i>=taskCount)return;try{const pr=await wc.spawn('node',['t-'+i+'.mjs']);const output=await collect(pr);const ec=await pr.exit;completed++;if(ec!==0){failed++;if(samples.length<3)samples.push({i,exit_code:ec,output:output.slice(-1200)})}}catch(e){completed++;failed++;if(samples.length<3)samples.push({i,error:String(e?.stack||e)})}}}
   const started=performance.now(); let timer;
   try{
     await Promise.race([
@@ -48,12 +49,12 @@ async function runCandidate(c){
       new Promise((_,reject)=>timer=setTimeout(()=>reject(new Error('STEP_TIMEOUT')),P.timeout_ms))
     ]);
     clearTimeout(timer);
-    const r={candidate:c,ok:failed===0&&completed===taskCount,timeout:false,elapsed_ms:Math.round(performance.now()-started),completed,failed,tasks:taskCount,probe};
+    const r={candidate:c,ok:failed===0&&completed===taskCount,timeout:false,elapsed_ms:Math.round(performance.now()-started),completed,failed,tasks:taskCount,samples,probe};
     try{await wc.teardown()}catch{}
     return r;
   }catch(e){
     clearTimeout(timer);
-    const r={candidate:c,ok:false,timeout:String(e?.message||e)==='STEP_TIMEOUT',elapsed_ms:Math.round(performance.now()-started),completed,failed,tasks:taskCount,error:String(e?.message||e),probe};
+    const r={candidate:c,ok:false,timeout:String(e?.message||e)==='STEP_TIMEOUT',elapsed_ms:Math.round(performance.now()-started),completed,failed,tasks:taskCount,error:String(e?.message||e),samples,probe};
     try{await wc.teardown()}catch{}
     return r;
   }
