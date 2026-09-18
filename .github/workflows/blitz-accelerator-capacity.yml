@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: zeibael-blitz-accelerator-capacity
+  cancel-in-progress: true
+
 jobs:
   accelerator-capacity:
     runs-on: ubuntu-latest
