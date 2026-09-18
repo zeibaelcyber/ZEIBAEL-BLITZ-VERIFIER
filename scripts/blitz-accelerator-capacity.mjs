@@ -2,6 +2,7 @@ import puppeteer from 'puppeteer';
 
 const TARGET='https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-stackblitz-direct?lane=stackblitz-compute-v1';
 const TIMEOUT_MS=30000;
+const STARTUP_TIMEOUT_MS=90000;
 const HARD_CAP=512;
 const CONFIRM_ROUNDS=3;
 
@@ -13,9 +14,11 @@ async function warmPage(){
   if(page&&!page.isClosed()) return page;
   page=await browser.newPage();
   await page.setViewport({width:1280,height:900});
-  await page.goto(TARGET,{waitUntil:'domcontentloaded',timeout:30000});
-  await page.waitForFunction(()=>typeof window.zeibaelRun==='function',{timeout:30000});
-  await page.waitForFunction(()=>document.getElementById('status')?.textContent==='READY',{timeout:30000});
+  await page.goto(TARGET,{waitUntil:'domcontentloaded',timeout:STARTUP_TIMEOUT_MS});
+  await page.waitForFunction(()=>typeof window.zeibaelRun==='function',{timeout:STARTUP_TIMEOUT_MS});
+  // READY text may include extra diagnostics; zeibaelRun is the authoritative readiness gate.
+  const status=await page.evaluate(()=>document.getElementById('status')?.textContent?.trim()??null);
+  console.log('ZEIBAEL_ACCELERATOR_STARTUP='+JSON.stringify({status,zeibaelRun:true,url:location.href}));
   return page;
 }
 
