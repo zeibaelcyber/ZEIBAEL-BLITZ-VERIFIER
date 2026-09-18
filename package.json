@@ -20,6 +20,6 @@
   },
   "stackblitz": {
     "installDependencies": false,
-    "startCommand": "npm run capacity:webcontainer"
+    "startCommand": "npm run plugins:maximize:summary"
   }
 }
