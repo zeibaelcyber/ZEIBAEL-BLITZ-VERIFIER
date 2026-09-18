@@ -12,13 +12,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: zeibael-blitz-accelerator-capacity
+  group: zeibael-blitz-accelerator-capacity-v2
   cancel-in-progress: true
 
 jobs:
   accelerator-capacity:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
