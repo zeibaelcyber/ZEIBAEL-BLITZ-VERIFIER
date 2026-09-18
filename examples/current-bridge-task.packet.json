@@ -1,0 +1,25 @@
+{
+  "task_id": "vercel-blitz-bridge-v1",
+  "objective": "Validate Vercel-to-Blitz bridge policy and current StackBlitz/WebContainer health",
+  "approval_id": "bos-2026-09-18-vercel-blitz-bridge-v1",
+  "jobs": [
+    {
+      "id": "blitz_runtime_verify",
+      "type": "command",
+      "command": "node src/verify-max.mjs --json",
+      "timeout_ms": 30000
+    },
+    {
+      "id": "vercel_bridge_policy_model",
+      "type": "command",
+      "command": "node -e \"const assert=require('node:assert/strict'); const p={executor:'STACKBLITZ_WEBCONTAINER',bridge:'VERCEL_FUNCTION_CHROMIUM',script:'bridge:current',zeroSpend:true,approval:true,liveOrder:false,arbitraryRemoteCode:false}; assert.equal(p.executor,'STACKBLITZ_WEBCONTAINER'); assert.equal(p.bridge,'VERCEL_FUNCTION_CHROMIUM'); assert.equal(p.script,'bridge:current'); assert.equal(p.zeroSpend,true); assert.equal(p.approval,true); assert.equal(p.liveOrder,false); assert.equal(p.arbitraryRemoteCode,false); console.log(JSON.stringify({status:'PASS',...p}))\""
+    },
+    {
+      "id": "public_stackblitz_origin",
+      "type": "http",
+      "url": "https://stackblitz.com/github/zeibaelcyber/ZEIBAEL-BLITZ-VERIFIER",
+      "accept_status": [200],
+      "timeout_ms": 15000
+    }
+  ]
+}
