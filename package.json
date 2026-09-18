@@ -13,13 +13,14 @@
     "builder:wave1": "node src/acker-accelerator.mjs examples/builder-wave1-evidence.packet.json",
     "builder:wave1:summary": "node scripts/run-builder-wave1-evidence.mjs",
     "plugins:remaining:summary": "node scripts/run-remaining-plugins-evidence.mjs",
-    "plugins:maximize:summary": "node scripts/run-plugin-resource-maximizer.mjs"
+    "plugins:maximize:summary": "node scripts/run-plugin-resource-maximizer.mjs",
+    "audit:hatchable": "node scripts/run-hatchable-dependency-audit.mjs"
   },
   "engines": {
     "node": ">=18"
   },
   "stackblitz": {
     "installDependencies": false,
-    "startCommand": "npm run capacity:webcontainer"
+    "startCommand": "npm run audit:hatchable"
   }
 }
