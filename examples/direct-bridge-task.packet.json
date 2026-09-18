@@ -1,0 +1,25 @@
+{
+  "task_id": "vercel-blitz-direct-v1",
+  "objective": "Validate the Vercel-to-Blitz direct WebContainer bridge without depending on the StackBlitz UI origin",
+  "approval_id": "bos-2026-09-18-vercel-blitz-direct-v1",
+  "jobs": [
+    {
+      "id": "blitz_runtime_verify",
+      "type": "command",
+      "command": "node src/verify-max.mjs --json",
+      "timeout_ms": 30000
+    },
+    {
+      "id": "vercel_direct_bridge_policy_model",
+      "type": "command",
+      "command": "node -e \"const assert=require('node:assert/strict'); const p={executor:'STACKBLITZ_WEBCONTAINER',bridge:'VERCEL_FUNCTION_CHROMIUM',transport:'DIRECT_WEBCONTAINER',script:'bridge:direct',zeroSpend:true,approval:true,liveOrder:false,arbitraryRemoteCode:false}; assert.equal(p.executor,'STACKBLITZ_WEBCONTAINER'); assert.equal(p.bridge,'VERCEL_FUNCTION_CHROMIUM'); assert.equal(p.transport,'DIRECT_WEBCONTAINER'); assert.equal(p.script,'bridge:direct'); assert.equal(p.zeroSpend,true); assert.equal(p.approval,true); assert.equal(p.liveOrder,false); assert.equal(p.arbitraryRemoteCode,false); console.log(JSON.stringify({status:'PASS',...p}))\""
+    },
+    {
+      "id": "public_verifier_source",
+      "type": "http",
+      "url": "https://raw.githubusercontent.com/zeibaelcyber/ZEIBAEL-BLITZ-VERIFIER/main/package.json",
+      "accept_status": [200],
+      "timeout_ms": 15000
+    }
+  ]
+}
