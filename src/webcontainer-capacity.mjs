@@ -29,7 +29,8 @@ if(!isMainThread){
   }
 }else{
   const runtime={node:process.version,platform:process.platform,arch:process.arch,cpus:os.cpus().length,totalmem:os.totalmem(),freemem_start:os.freemem()};
-  const stamp=Date.now()+'-'+Math.random().toString(36).slice(2,8);
+  const SOURCE=process.env.ZEIBAEL_SOURCE||'stackblitz-webcontainer';
+  const stamp=SOURCE+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);
 
   // PHASE 1: worker/thread boundary with no intentional per-worker payload allocation.
   const WORKER_MAX=Number(process.env.WORKER_MAX||128);
@@ -38,7 +39,7 @@ if(!isMainThread){
   const workers=[];
   let workerStable=0,workerFailure=null;
   console.log('ZEIBAEL_WORKER_ONLY_BEGIN='+JSON.stringify({benchmark_id:worker_id,runtime,max_workers:WORKER_MAX}));
-  await postEvidence(worker_id,'begin',0,{schema:'zeibael.webcontainer.worker_only.v1',runtime,max_workers:WORKER_MAX});
+  await postEvidence(worker_id,'begin',0,{schema:'zeibael.webcontainer.worker_only.v1',source:SOURCE,runtime,max_workers:WORKER_MAX});
 
   for(let n=1;n<=WORKER_MAX;n++){
     try{
@@ -67,6 +68,7 @@ if(!isMainThread){
     max_stable_workers:workerStable,
     first_failed_worker:workerFailure?.worker??null,
     failure:workerFailure?.reason??null,
+    source:SOURCE,
     runtime,
     final:{rss:process.memoryUsage().rss}
   };
@@ -83,7 +85,7 @@ if(!isMainThread){
   const blocks=[];
   let allocated=0,ramFailure=null;
   console.log('ZEIBAEL_RAM_ONLY_BEGIN='+JSON.stringify({benchmark_id:ram_id,runtime,chunk_mib:CHUNK_MIB,max_mib:RAM_MAX_MIB}));
-  await postEvidence(ram_id,'begin',0,{schema:'zeibael.webcontainer.ram_only.v1',runtime,chunk_mib:CHUNK_MIB,max_mib:RAM_MAX_MIB});
+  await postEvidence(ram_id,'begin',0,{schema:'zeibael.webcontainer.ram_only.v1',source:SOURCE,runtime,chunk_mib:CHUNK_MIB,max_mib:RAM_MAX_MIB});
 
   for(let chunk=1;allocated+CHUNK_MIB<=RAM_MAX_MIB;chunk++){
     try{
@@ -110,6 +112,7 @@ if(!isMainThread){
     failure:ramFailure?.reason??null,
     chunk_mib:CHUNK_MIB,
     max_tested_mib:RAM_MAX_MIB,
+    source:SOURCE,
     runtime,
     final:{rss:process.memoryUsage().rss}
   };
