@@ -14,65 +14,8 @@ const STEP_TIMEOUT_MS = 30000;
 const CANDIDATES = [1,2,4,8,16,24,32,48,64,96,128,192,256,384,512,768,1024,1280,1536,1791];
 
 const html = `<!doctype html><meta charset="utf-8"><title>ZEIBAEL Blitz Adaptive Capacity</title>
-<pre id="status">BOOTING</pre>
-<script type="module">
-import { WebContainer } from "/wc/index.js";
-const status = document.getElementById("status");
-window.__bootDiag = {
-  coi: globalThis.crossOriginIsolated === true,
-  sab: typeof SharedArrayBuffer === "function",
-  secure: globalThis.isSecureContext === true,
-  hc: navigator.hardwareConcurrency || null,
-  dm: navigator.deviceMemory || null,
-  ua: navigator.userAgent
-};
-async function drain(proc){
-  const reader=proc.output.getReader();
-  for(;;){const x=await reader.read();if(x.done)break;}
-}
-try{
-  window.__bootDiag.imported = true;
-  const wc=await WebContainer.boot({coep:"credentialless"});
-  status.textContent="MOUNTING";\n  await wc.fs.writeFile("/package.json",JSON.stringify({name:"zeibael-capacity",version:"1.0.0",private:true,type:"module"}));
-  await wc.fs.writeFile("/task.mjs",`
-    import crypto from "node:crypto";
-    const id=Number(process.argv[2]||0);
-    const p=JSON.stringify({id,symbol:"ZEIBAEL",live_order_enabled:false});
-    if(JSON.parse(p).live_order_enabled!==false) process.exit(2);
-    const h=crypto.createHash("sha256").update(p).digest("hex");
-    if(h.length!==64) process.exit(3);
-  `);
-  window.zeibaelRun=async({count,concurrency})=>{
-    const started=performance.now();
-    let next=0,completed=0,failed=0,active=0,maxActive=0;
-    return await new Promise(resolve=>{
-      const launch=()=>{
-        while(active<concurrency && next<count){
-          const id=next++; active++; if(active>maxActive)maxActive=active;
-          (async()=>{
-            try{
-              const p=await wc.spawn("node",["task.mjs",String(id)]);
-              await drain(p);
-              const code=await p.exit;
-              if(code!==0)failed++;
-            }catch{failed++;}
-            completed++; active--;
-            if(completed===count) resolve({
-              ok:failed===0,completed,failed,max_active:maxActive,
-              elapsed_ms:Math.round(performance.now()-started)
-            });
-            else launch();
-          })();
-        }
-      };
-      launch();
-    });
-  };
-  status.textContent="READY";
-}catch(e){
-  status.textContent="BOOT_ERROR:"+String(e?.stack||e?.message||e);
-}
-</script>`;
+<pre id="status">HOST_READY</pre>
+<script>window.__classicRan=true;</script>`;
 
 const server=http.createServer(async(req,res)=>{
   try{
@@ -150,6 +93,70 @@ page.on("response",(resp)=>{
 const probes=[];
 try{
   await page.goto("http://127.0.0.1:"+PORT+"/",{waitUntil:"domcontentloaded",timeout:15000});
+  await page.evaluate(async()=>{
+    const status=document.getElementById("status");
+    window.__bootDiag={
+      stage:"IMPORT_START",
+      classicRan:window.__classicRan===true,
+      coi:globalThis.crossOriginIsolated===true,
+      sab:typeof SharedArrayBuffer==="function",
+      secure:globalThis.isSecureContext===true,
+      hc:navigator.hardwareConcurrency||null,
+      dm:navigator.deviceMemory||null,
+      ua:navigator.userAgent
+    };
+    try{
+      const mod=await import("/wc/index.js");
+      window.__bootDiag.stage="IMPORTED";
+      window.__bootDiag.imported=true;
+      const wc=await mod.WebContainer.boot({coep:"credentialless"});
+      window.__bootDiag.stage="BOOTED";
+      window.__bootDiag.booted=true;
+      await wc.fs.writeFile("/package.json",JSON.stringify({name:"zeibael-capacity",version:"1.0.0",private:true,type:"module"}));
+      const task=[
+        'import crypto from "node:crypto";',
+        'const id=Number(process.argv[2]||0);',
+        'const p=JSON.stringify({id,symbol:"ZEIBAEL",live_order_enabled:false});',
+        'if(JSON.parse(p).live_order_enabled!==false) process.exit(2);',
+        'const h=crypto.createHash("sha256").update(p).digest("hex");',
+        'if(h.length!==64) process.exit(3);'
+      ].join("\n");
+      await wc.fs.writeFile("/task.mjs",task);
+      async function drain(proc){
+        const reader=proc.output.getReader();
+        for(;;){const x=await reader.read();if(x.done)break;}
+      }
+      window.zeibaelRun=async({count,concurrency})=>{
+        const started=performance.now();
+        let next=0,completed=0,failed=0,active=0,maxActive=0;
+        return await new Promise(resolve=>{
+          const launch=()=>{
+            while(active<concurrency&&next<count){
+              const id=next++; active++; if(active>maxActive)maxActive=active;
+              (async()=>{
+                try{
+                  const p=await wc.spawn("node",["task.mjs",String(id)]);
+                  await drain(p);
+                  const code=await p.exit;
+                  if(code!==0)failed++;
+                }catch{failed++;}
+                completed++; active--;
+                if(completed===count)resolve({ok:failed===0,completed,failed,max_active:maxActive,elapsed_ms:Math.round(performance.now()-started)});
+                else launch();
+              })();
+            }
+          };
+          launch();
+        });
+      };
+      window.__bootDiag.stage="READY";
+      status.textContent="READY";
+    }catch(e){
+      window.__bootDiag.stage="ERROR";
+      window.__bootDiag.error=String(e?.stack||e?.message||e).slice(0,2000);
+      status.textContent="BOOT_ERROR:"+String(e?.message||e).slice(0,1000);
+    }
+  });
   const deadline=Date.now()+STARTUP_TIMEOUT_MS;
   let diag=null;
   while(Date.now()<deadline){
