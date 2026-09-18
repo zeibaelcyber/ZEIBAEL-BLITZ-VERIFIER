@@ -1,0 +1,25 @@
+name: ZEIBAEL Blitz v5 Exact Boundary
+
+on:
+  push:
+    paths:
+      - 'scripts/blitz-v5-exact-browser.mjs'
+      - '.github/workflows/blitz-v5-exact.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install browser harness
+        run: npm install --no-save --no-package-lock puppeteer@24.16.0
+      - name: Run genuine WebContainer boundary search
+        run: node scripts/blitz-v5-exact-browser.mjs
