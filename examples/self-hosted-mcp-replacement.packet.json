@@ -107,5 +107,17 @@
       "Hatchable",
       "Railway"
     ]
+  },
+  "live_hosted_limit_evidence": {
+    "hatchable": "browser farm timed out around 58s during live Blitz scorer bridge",
+    "floot": "weekly build limit reached: 400 build actions in rolling 7-day window; reset reported 2026-09-21T00:00:00Z",
+    "vercel": "connector team readback blocked by OAuth scope; hosted Hobby remains quota capped",
+    "conclusion": "hosted providers cannot satisfy literal no-vendor-limit requirement"
+  },
+  "recommendation": {
+    "current_free_vps": "docker/mcp-gateway + manusa/podman-mcp-server + microsoft/playwright-mcp",
+    "optional_heavy_worker": "agent-infra/sandbox when >=2Gi RAM is available",
+    "future_max_scale": "containers/kubernetes-mcp-server + agent-infra/sandbox pods",
+    "vendor_metering": "none for self-hosted core; bounded only by host CPU/RAM/disk/network"
   }
 }
