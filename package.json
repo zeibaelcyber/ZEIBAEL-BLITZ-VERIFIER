@@ -16,7 +16,8 @@
     "plugins:remaining:summary": "node scripts/run-remaining-plugins-evidence.mjs",
     "plugins:maximize:summary": "node scripts/run-plugin-resource-maximizer.mjs",
     "bridge:current": "node scripts/run-bridge-current.mjs",
-    "bridge:direct": "node scripts/run-bridge-direct.mjs"
+    "bridge:direct": "node scripts/run-bridge-direct.mjs",
+    "audit:selfhost-mcp": "node scripts/run-self-hosted-mcp-replacement.mjs"
   },
   "engines": {
     "node": ">=18"
