@@ -12,12 +12,13 @@ const jobs = Array.isArray(packet.jobs) ? packet.jobs : [];
 const byId = new Map(jobs.map(j => [j.id, j]));
 const state = new Map();
 const startedAt = Date.now();
-const WORKER_THREAD_CEILING = 1791;
+const WORKER_THREAD_CEILING_REFERENCE = 1791;
+const WEBCONTAINER_SAFE_PARALLEL_SLOTS = 57;
 const requestedConcurrency = Number(packet.max_concurrency ?? packet.concurrency ?? jobs.length);
 const maxConcurrency =
   Number.isFinite(requestedConcurrency) && requestedConcurrency >= 1
-    ? Math.min(WORKER_THREAD_CEILING, Math.floor(requestedConcurrency))
-    : Math.min(WORKER_THREAD_CEILING, Math.max(1, jobs.length));
+    ? Math.min(WEBCONTAINER_SAFE_PARALLEL_SLOTS, Math.floor(requestedConcurrency))
+    : Math.min(WEBCONTAINER_SAFE_PARALLEL_SLOTS, Math.max(1, jobs.length));
 
 function safeText(v, max = 12000) {
   const s = String(v ?? '');
@@ -179,7 +180,8 @@ const output = {
   mode: 'BOUNDED_MAX_READY_PARALLEL',
   jobs_total: jobs.length,
   max_concurrency: maxConcurrency,
-  worker_thread_ceiling_reference: WORKER_THREAD_CEILING,
+  worker_thread_ceiling_reference: WORKER_THREAD_CEILING_REFERENCE,
+  webcontainer_safe_parallel_slots: WEBCONTAINER_SAFE_PARALLEL_SLOTS,
   pass: results.filter(x => x?.status === 'PASS').length,
   failed: results.filter(x => x?.status === 'FAILED').length,
   blocked: results.filter(x => x?.status === 'BLOCKED').length,
