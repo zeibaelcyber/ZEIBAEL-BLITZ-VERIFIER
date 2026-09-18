@@ -31,6 +31,7 @@ async function drain(proc){
   for(;;){const x=await reader.read();if(x.done)break;}
 }
 try{
+  window.__bootDiag.imported = true;
   const wc=await WebContainer.boot({coep:"credentialless"});
   await wc.fs.writeFile("/package.json",JSON.stringify({name:"zeibael-capacity",version:"1.0.0",private:true,type:"module"}));
   await wc.fs.writeFile("/task.mjs",`
