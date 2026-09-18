@@ -4,16 +4,22 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'scripts/blitz-capability-map-browser.mjs'
+      - 'scripts/blitz-capability-profile.mjs'
       - '.github/workflows/blitz-capability-map.yml'
 
 permissions:
   contents: read
 
 jobs:
-  capability-map:
+  profile:
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [LIGHT, IO, BUILD_TEST, CPU_HEAVY]
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
+    env:
+      PROFILE: ${{ matrix.profile }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,10 +27,5 @@ jobs:
           node-version: '24'
       - name: Install browser harness
         run: npm install --no-save --no-package-lock puppeteer@24.16.0
-      - name: Run capability map
-        run: node scripts/blitz-capability-map-browser.mjs
-      - name: Upload capability evidence
-        uses: actions/upload-artifact@v4
-        with:
-          name: blitz-capability-map
-          path: evidence/blitz-capability-map-latest.json
+      - name: Run capability profile
+        run: node scripts/blitz-capability-profile.mjs
