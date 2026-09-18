@@ -131,6 +131,22 @@ const browser=await puppeteer.launch({
   args:buildArgs()
 });
 const page=await browser.newPage();
+const browserDiagnostics=[];
+page.on("console",(msg)=>{
+  browserDiagnostics.push({type:"console",level:msg.type(),text:msg.text().slice(0,500)});
+});
+page.on("pageerror",(err)=>{
+  browserDiagnostics.push({type:"pageerror",text:String(err?.stack||err?.message||err).slice(0,1200)});
+});
+page.on("requestfailed",(req)=>{
+  browserDiagnostics.push({type:"requestfailed",url:req.url(),failure:req.failure()?.errorText||null});
+});
+page.on("response",(resp)=>{
+  const u=resp.url();
+  if(u.includes("/wc/") || u.includes("webcontainer") || resp.status()>=400){
+    browserDiagnostics.push({type:"response",url:u,status:resp.status(),ct:resp.headers()["content-type"]||null});
+  }
+});
 const probes=[];
 try{
   await page.goto("http://127.0.0.1:"+PORT+"/",{waitUntil:"domcontentloaded",timeout:15000});
@@ -153,7 +169,7 @@ try{
   if(!(diag?.status==="READY"&&diag?.coi&&diag?.sab&&diag?.secure&&diag?.hasRun)){
     console.log("ZEIBAEL_ACCELERATOR_RESULT="+JSON.stringify({
       schema:"zeibael.blitz.accelerator-capacity.v3",
-      status:"HOST_CAPABILITY_FAILURE",startup:diag,probes
+      status:"HOST_CAPABILITY_FAILURE",startup:diag,browser_diagnostics:browserDiagnostics.slice(-80),probes
     }));
     process.exitCode=2;
   }else{
