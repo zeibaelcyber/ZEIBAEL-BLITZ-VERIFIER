@@ -1,0 +1,32 @@
+{
+  "schema": "zeibael.blitz.capability-map.config.v1",
+  "manual_only": true,
+  "auto_trigger_workers": false,
+  "profiles": {
+    "LIGHT": {
+      "timeout_ms": 15000,
+      "hard_cap": 1024,
+      "safe_ratio": 0.8,
+      "version": 1
+    },
+    "IO": {
+      "timeout_ms": 20000,
+      "hard_cap": 512,
+      "safe_ratio": 0.75,
+      "version": 1
+    },
+    "BUILD_TEST": {
+      "timeout_ms": 30000,
+      "hard_cap": 256,
+      "safe_ratio": 0.7,
+      "version": 1
+    },
+    "CPU_HEAVY": {
+      "timeout_ms": 30000,
+      "hard_cap": 128,
+      "safe_ratio": 0.6,
+      "version": 1
+    }
+  },
+  "exact_boundary_confirmation_rounds": 2
+}
