@@ -1,0 +1,42 @@
+{
+  "task_id": "openclaw-hermes-blitz-one-shot",
+  "objective": "Compile once, execute once, return compact evidence without planner loops",
+  "max_concurrency": 32,
+  "planner": {
+    "openclaw": {
+      "role": "PLAN_COMPACTOR",
+      "runtime_verified": false,
+      "advisory_only": true,
+      "trace_id": "openclaw-preblitz"
+    },
+    "hermes": {
+      "role": "TASK_SHARDER",
+      "runtime_verified": false,
+      "advisory_only": true,
+      "trace_id": "hermes-preblitz"
+    }
+  },
+  "jobs": [
+    {
+      "id": "validate_contract",
+      "type": "inline",
+      "code": "return {ok:true,stage:'contract'}"
+    },
+    {
+      "id": "validate_contract_duplicate",
+      "type": "inline",
+      "code": "return {ok:true,stage:'contract'}"
+    },
+    {
+      "id": "prepare",
+      "type": "inline",
+      "code": "return {ok:true,stage:'prepare'}"
+    },
+    {
+      "id": "final",
+      "type": "inline",
+      "depends_on": ["validate_contract_duplicate", "prepare"],
+      "code": "return {ok:true,stage:'final',live_order_enabled:false}"
+    }
+  ]
+}
