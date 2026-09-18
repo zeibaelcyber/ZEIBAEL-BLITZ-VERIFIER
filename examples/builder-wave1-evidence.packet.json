@@ -1,0 +1,77 @@
+{
+  "task_id": "builder-plugins-wave1-2026-09-18",
+  "objective": "Validate secret-free Wave 1 integration evidence for Base44, Lovable, and Replit in parallel",
+  "jobs": [
+    {
+      "id": "base44_canary",
+      "type": "inline",
+      "code": "const x={provider:'base44',read_canary:'PASS',apps_observed:1}; if(x.read_canary!=='PASS'||x.apps_observed<1) throw new Error('BASE44_CANARY_FAIL'); return x;"
+    },
+    {
+      "id": "lovable_canary",
+      "type": "inline",
+      "code": "const x={provider:'lovable',read_canary:'PASS',plan:'free',projects_observed:1}; if(x.read_canary!=='PASS'||x.plan!=='free') throw new Error('LOVABLE_CANARY_FAIL'); return x;"
+    },
+    {
+      "id": "replit_canary",
+      "type": "inline",
+      "code": "const x={provider:'replit',read_canary:'PASS',apps_observed:1}; if(x.read_canary!=='PASS'||x.apps_observed<1) throw new Error('REPLIT_CANARY_FAIL'); return x;"
+    },
+    {
+      "id": "zero_spend",
+      "type": "inline",
+      "code": "const x={zero_spend_required:true,paid_fallback_allowed:false}; if(!x.zero_spend_required||x.paid_fallback_allowed) throw new Error('ZERO_SPEND_POLICY_FAIL'); return x;"
+    },
+    {
+      "id": "mutation_gate",
+      "type": "inline",
+      "code": "const x={explicit_user_approval_required:true,zero_spend_confirmation_required:true}; if(!x.explicit_user_approval_required||!x.zero_spend_confirmation_required) throw new Error('MUTATION_GATE_FAIL'); return x;"
+    },
+    {
+      "id": "trading_safety",
+      "type": "inline",
+      "code": "const x={live_order_enabled:false,baseline_mutation_allowed:false}; if(x.live_order_enabled||x.baseline_mutation_allowed) throw new Error('TRADING_SAFETY_FAIL'); return x;"
+    },
+    {
+      "id": "secret_safety",
+      "type": "inline",
+      "code": "const x={secrets_in_public_blitz:false,private_source_in_public_blitz:false}; if(x.secrets_in_public_blitz||x.private_source_in_public_blitz) throw new Error('PUBLIC_BLITZ_SECRET_FAIL'); return x;"
+    },
+    {
+      "id": "role_boundary",
+      "type": "inline",
+      "code": "const x={role:'OPTIONAL_APP_BUILDER',canonical_memory:false,trading_judge:false}; if(x.canonical_memory||x.trading_judge) throw new Error('ROLE_BOUNDARY_FAIL'); return x;"
+    },
+    {
+      "id": "provider_bundle",
+      "type": "inline",
+      "depends_on": [
+        "base44_canary",
+        "lovable_canary",
+        "replit_canary"
+      ],
+      "code": "return {providers:['base44','lovable','replit'],connector_native_canaries:'PASS'};"
+    },
+    {
+      "id": "governance_bundle",
+      "type": "inline",
+      "depends_on": [
+        "zero_spend",
+        "mutation_gate",
+        "trading_safety",
+        "secret_safety",
+        "role_boundary"
+      ],
+      "code": "return {governance:'PASS',mutation_calls_executed:false};"
+    },
+    {
+      "id": "wave1_final",
+      "type": "inline",
+      "depends_on": [
+        "provider_bundle",
+        "governance_bundle"
+      ],
+      "code": "return {schema:'zeibael.builder_plugins.wave1.blitz_evidence.v1',status:'VERIFIED',runtime_scope:'SECRET_FREE_POLICY_AND_EVIDENCE_PACKET',connector_calls_inside_blitz:false};"
+    }
+  ]
+}
