@@ -1,6 +1,12 @@
 import http from "node:http";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const WC_DIST = path.resolve(__dirname, "../node_modules/@webcontainer/api/dist");
 
 const PORT = 4182;
 const STARTUP_TIMEOUT_MS = 60000;
