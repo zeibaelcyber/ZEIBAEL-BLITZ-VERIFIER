@@ -1,107 +1,203 @@
-import puppeteer from 'puppeteer';
+import http from "node:http";
+import puppeteer from "puppeteer";
 
-const TARGET='https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-stackblitz-direct?lane=stackblitz-compute-v1';
-const TIMEOUT_MS=30000;
-const STARTUP_TIMEOUT_MS=90000;
-const HARD_CAP=512;
-const CONFIRM_ROUNDS=3;
+const PORT = 4182;
+const STARTUP_TIMEOUT_MS = 60000;
+const STEP_TIMEOUT_MS = 30000;
+const CANDIDATES = [1,2,4,8,16,24,32,48,64,96,128,192,256,384,512,768,1024,1280,1536,1791];
 
-const browser=await puppeteer.launch({headless:true,args:['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage']});
-let page=null;
-const probes=[];
-
-async function warmPage(){
-  if(page&&!page.isClosed()) return page;
-  page=await browser.newPage();
-  await page.setViewport({width:1280,height:900});
-  await page.goto(TARGET,{waitUntil:'domcontentloaded',timeout:STARTUP_TIMEOUT_MS});
-  await page.waitForFunction(()=>typeof window.zeibaelRun==='function',{timeout:STARTUP_TIMEOUT_MS});
-  // READY text may include extra diagnostics; zeibaelRun is the authoritative readiness gate.
-  const status=await page.evaluate(()=>document.getElementById('status')?.textContent?.trim()??null);
-  console.log('ZEIBAEL_ACCELERATOR_STARTUP='+JSON.stringify({status,zeibaelRun:true,url:location.href}));
-  return page;
-}
-
-function makeTasks(c){
-  const code='import crypto from "node:crypto";const p=JSON.stringify({symbol:"ZEIBAEL",checks:["schema","hash","json"],live_order_enabled:false});const x=JSON.parse(p);if(x.live_order_enabled!==false)process.exit(2);const h=crypto.createHash("sha256").update(p).digest("hex");if(h.length!==64)process.exit(3);';
-  return Array.from({length:c},(_,i)=>({id:'slot-'+(i+1),code}));
-}
-
-async function probe(c,label){
-  const t0=Date.now();
-  let result;
-  try{
-    const p=await warmPage();
-    const payload=makeTasks(c);
-    result=await p.evaluate(async ({payload,c,timeout})=>{
-      let timer;
-      try{
-        return await Promise.race([
-          window.zeibaelRun({tasks:payload,concurrency:c}),
-          new Promise((_,rej)=>timer=setTimeout(()=>rej(new Error('STEP_TIMEOUT')),timeout))
-        ]);
-      }finally{clearTimeout(timer)}
-    },{payload,c,timeout:TIMEOUT_MS});
-    result={candidate:c,ok:result?.ok===true,timeout:false,elapsed_ms:result?.compute_elapsed_ms??(Date.now()-t0),tasks:result?.tasks??c,failed:Array.isArray(result?.results)?result.results.filter(x=>!x.ok).length:null};
-  }catch(e){
-    const msg=String(e?.message||e);
-    result={candidate:c,ok:false,timeout:msg.includes('STEP_TIMEOUT'),host_error:msg,elapsed_ms:Date.now()-t0};
-    try{await page?.close()}catch{}
-    page=null;
-  }
-  result.label=label;
-  result.host_elapsed_ms=Date.now()-t0;
-  probes.push(result);
-  console.log('ZEIBAEL_ACCELERATOR_PROBE='+JSON.stringify(result));
-  return result;
-}
-
-let low=0,high=null;
-for(const c of [1,2,4,8,16,24,32,48,64,96,128,192,256,384,512]){
-  const r=await probe(c,'ramp');
-  if(r.ok) low=c;
-  else {high=c; break;}
-}
-
-if(low===0){
-  const result={schema:'zeibael.blitz.accelerator-capacity.v2',status:'HARNESS_OR_RUNTIME_FAILURE_AT_1',max_stable_parallel_slots:null,first_timeout_or_fail:high,probes};
-  console.log('ZEIBAEL_ACCELERATOR_RESULT='+JSON.stringify(result));
-  await browser.close();
-  process.exit(2);
-}
-
-if(high===null){
-  const result={schema:'zeibael.blitz.accelerator-capacity.v2',status:'LOWER_BOUND_ONLY',max_stable_parallel_slots:low,first_timeout_or_fail:null,safe_operating_slots:Math.floor(low*0.9),probes};
-  console.log('ZEIBAEL_ACCELERATOR_RESULT='+JSON.stringify(result));
-  await browser.close();
-  process.exit(0);
-}
-
-while(high-low>1){
-  const mid=Math.floor((low+high)/2);
-  const r=await probe(mid,'binary');
-  if(r.ok) low=mid; else high=mid;
-}
-
-const confirmations=[];
-for(let round=1;round<=CONFIRM_ROUNDS;round++){
-  const good=await probe(low,'confirm_pass_'+round);
-  const bad=await probe(high,'confirm_fail_'+round);
-  confirmations.push({round,good,bad});
-}
-
-const exact=confirmations.every(x=>x.good.ok&&!x.bad.ok&&high===low+1);
-const result={
-  schema:'zeibael.blitz.accelerator-capacity.v2',
-  status:exact?'EXACT_BOUNDARY_CONFIRMED':'VARIABLE_BOUNDARY',
-  workload:'ACKER_ACCELERATOR_LIGHT_SHARD_V1',
-  timeout_ms:TIMEOUT_MS,
-  max_stable_parallel_slots:exact?low:null,
-  first_timeout_or_fail:exact?high:null,
-  safe_operating_slots:Math.max(1,Math.floor(low*0.9)),
-  confirmations,
-  probes
+const html = `<!doctype html><meta charset="utf-8"><title>ZEIBAEL Blitz Adaptive Capacity</title>
+<pre id="status">BOOTING</pre>
+<script type="module">
+import { WebContainer } from "https://esm.sh/@webcontainer/api@1.6.4";
+const status = document.getElementById("status");
+window.__bootDiag = {
+  coi: globalThis.crossOriginIsolated === true,
+  sab: typeof SharedArrayBuffer === "function",
+  secure: globalThis.isSecureContext === true,
+  hc: navigator.hardwareConcurrency || null,
+  dm: navigator.deviceMemory || null,
+  ua: navigator.userAgent
 };
-console.log('ZEIBAEL_ACCELERATOR_RESULT='+JSON.stringify(result));
-await browser.close();
-process.exit(exact?0:2);
+async function drain(proc){
+  const reader=proc.output.getReader();
+  for(;;){const x=await reader.read();if(x.done)break;}
+}
+try{
+  const wc=await WebContainer.boot({coep:"credentialless"});
+  await wc.fs.writeFile("/package.json",JSON.stringify({name:"zeibael-capacity",version:"1.0.0",private:true,type:"module"}));
+  await wc.fs.writeFile("/task.mjs",`
+    import crypto from "node:crypto";
+    const id=Number(process.argv[2]||0);
+    const p=JSON.stringify({id,symbol:"ZEIBAEL",live_order_enabled:false});
+    if(JSON.parse(p).live_order_enabled!==false) process.exit(2);
+    const h=crypto.createHash("sha256").update(p).digest("hex");
+    if(h.length!==64) process.exit(3);
+  `);
+  window.zeibaelRun=async({count,concurrency})=>{
+    const started=performance.now();
+    let next=0,completed=0,failed=0,active=0,maxActive=0;
+    return await new Promise(resolve=>{
+      const launch=()=>{
+        while(active<concurrency && next<count){
+          const id=next++; active++; if(active>maxActive)maxActive=active;
+          (async()=>{
+            try{
+              const p=await wc.spawn("node",["task.mjs",String(id)]);
+              await drain(p);
+              const code=await p.exit;
+              if(code!==0)failed++;
+            }catch{failed++;}
+            completed++; active--;
+            if(completed===count) resolve({
+              ok:failed===0,completed,failed,max_active:maxActive,
+              elapsed_ms:Math.round(performance.now()-started)
+            });
+            else launch();
+          })();
+        }
+      };
+      launch();
+    });
+  };
+  status.textContent="READY";
+}catch(e){
+  status.textContent="BOOT_ERROR:"+String(e?.stack||e?.message||e);
+}
+</script>`;
+
+const server=http.createServer((req,res)=>{
+  res.setHeader("content-type","text/html; charset=utf-8");
+  res.setHeader("cache-control","no-store");
+  res.setHeader("Cross-Origin-Opener-Policy","same-origin");
+  res.setHeader("Cross-Origin-Embedder-Policy","credentialless");
+  res.setHeader("Cross-Origin-Resource-Policy","same-origin");
+  res.end(html);
+});
+await new Promise(r=>server.listen(PORT,"127.0.0.1",r));
+
+function buildArgs(){
+  const blockedExact=new Set(["--disable-site-isolation-trials","--disable-web-security","--single-process"]);
+  const blockedFeatures=new Set(["IsolateOrigins","site-per-process","ProcessPerSiteUpToMainFrameThreshold","IsolateSandboxedIframes"]);
+  const args=[]; const enable=new Set();
+  for(const arg of puppeteer.defaultArgs({headless:true})){
+    if(blockedExact.has(arg))continue;
+    if(arg.startsWith("--disable-features=")){
+      const kept=arg.slice(19).split(",").filter(Boolean).filter(x=>!blockedFeatures.has(x));
+      if(kept.length)args.push("--disable-features="+kept.join(","));
+      continue;
+    }
+    if(arg.startsWith("--enable-features=")){
+      for(const x of arg.slice(18).split(","))if(x)enable.add(x);
+      continue;
+    }
+    args.push(arg);
+  }
+  enable.add("SharedArrayBuffer");
+  enable.add("SiteIsolationForCrossOriginOpenerPolicy");
+  args.push("--enable-features="+[...enable].join(","));
+  args.push("--site-per-process","--isolate-origins=http://127.0.0.1:"+PORT,"--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage");
+  return [...new Set(args)];
+}
+
+const browser=await puppeteer.launch({
+  headless:true,
+  executablePath:puppeteer.executablePath(),
+  ignoreDefaultArgs:true,
+  args:buildArgs()
+});
+const page=await browser.newPage();
+const probes=[];
+try{
+  await page.goto("http://127.0.0.1:"+PORT+"/",{waitUntil:"domcontentloaded",timeout:15000});
+  const deadline=Date.now()+STARTUP_TIMEOUT_MS;
+  let diag=null;
+  while(Date.now()<deadline){
+    diag=await page.evaluate(()=>({
+      status:document.getElementById("status")?.textContent||null,
+      coi:globalThis.crossOriginIsolated===true,
+      sab:typeof SharedArrayBuffer==="function",
+      secure:globalThis.isSecureContext===true,
+      hasRun:typeof window.zeibaelRun==="function",
+      bootDiag:window.__bootDiag||null
+    }));
+    if(diag.status==="READY"&&diag.coi&&diag.sab&&diag.secure&&diag.hasRun)break;
+    if(String(diag.status||"").startsWith("BOOT_ERROR:"))break;
+    await new Promise(r=>setTimeout(r,250));
+  }
+  console.log("ZEIBAEL_ACCELERATOR_STARTUP="+JSON.stringify(diag));
+  if(!(diag?.status==="READY"&&diag?.coi&&diag?.sab&&diag?.secure&&diag?.hasRun)){
+    console.log("ZEIBAEL_ACCELERATOR_RESULT="+JSON.stringify({
+      schema:"zeibael.blitz.accelerator-capacity.v3",
+      status:"HOST_CAPABILITY_FAILURE",startup:diag,probes
+    }));
+    process.exitCode=2;
+  }else{
+    async function probe(c,label){
+      const t0=Date.now();
+      let result;
+      try{
+        result=await page.evaluate(async({c,timeout})=>{
+          let timer;
+          try{
+            return await Promise.race([
+              window.zeibaelRun({count:c,concurrency:c}),
+              new Promise((_,rej)=>timer=setTimeout(()=>rej(new Error("STEP_TIMEOUT")),timeout))
+            ]);
+          }finally{clearTimeout(timer)}
+        },{c,timeout:STEP_TIMEOUT_MS});
+        result={candidate:c,ok:result?.ok===true,timeout:false,...result,label,host_elapsed_ms:Date.now()-t0};
+      }catch(e){
+        const msg=String(e?.message||e);
+        result={candidate:c,ok:false,timeout:msg.includes("STEP_TIMEOUT"),host_error:msg,label,host_elapsed_ms:Date.now()-t0};
+      }
+      probes.push(result);
+      console.log("ZEIBAEL_ACCELERATOR_PROBE="+JSON.stringify(result));
+      return result;
+    }
+
+    let low=0,high=null;
+    for(const c of CANDIDATES){
+      const r=await probe(c,"ramp");
+      if(r.ok)low=c;
+      else{high=c;break;}
+    }
+
+    if(low===0){
+      console.log("ZEIBAEL_ACCELERATOR_RESULT="+JSON.stringify({
+        schema:"zeibael.blitz.accelerator-capacity.v3",
+        status:"NO_STABLE_CAPACITY",max_stable_parallel_slots:null,first_timeout_or_fail:high,probes
+      }));
+      process.exitCode=2;
+    }else if(high===null){
+      console.log("ZEIBAEL_ACCELERATOR_RESULT="+JSON.stringify({
+        schema:"zeibael.blitz.accelerator-capacity.v3",
+        status:"LOWER_BOUND_ONLY",max_stable_parallel_slots:low,first_timeout_or_fail:null,
+        safe_operating_slots:Math.max(1,Math.floor(low*0.9)),probes
+      }));
+    }else{
+      while(high-low>1){
+        const mid=Math.floor((low+high)/2);
+        const r=await probe(mid,"binary");
+        if(r.ok)low=mid;else high=mid;
+      }
+      const confirmGood=await probe(low,"confirm_pass");
+      const confirmBad=await probe(high,"confirm_fail");
+      const exact=confirmGood.ok&&!confirmBad.ok&&high===low+1;
+      console.log("ZEIBAEL_ACCELERATOR_RESULT="+JSON.stringify({
+        schema:"zeibael.blitz.accelerator-capacity.v3",
+        status:exact?"EXACT_BOUNDARY_CONFIRMED":"VARIABLE_BOUNDARY",
+        max_stable_parallel_slots:exact?low:null,
+        first_timeout_or_fail:exact?high:null,
+        safe_operating_slots:Math.max(1,Math.floor(low*0.9)),
+        worker_thread_ceiling_reference:1791,
+        probes
+      }));
+      if(!exact)process.exitCode=2;
+    }
+  }
+}finally{
+  await page.close().catch(()=>{});
+  await browser.close().catch(()=>{});
+  server.close();
+}
