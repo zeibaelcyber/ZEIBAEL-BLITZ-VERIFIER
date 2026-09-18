@@ -41,6 +41,17 @@ function jobSemanticShape(job) {
   };
 }
 
+function dedupeEligible(job) {
+  if (job.dedupe_safe === true) return true;
+  if (job.dedupe_safe === false) return false;
+  if (job.type === "inline") return true;
+  if (job.type === "http") {
+    const method = String(job.method || "GET").toUpperCase();
+    return (method === "GET" || method === "HEAD") && job.body == null;
+  }
+  return false;
+}
+
 function fingerprint(job) {
   return createHash("sha256")
     .update(JSON.stringify(stableObject(jobSemanticShape(job))))
@@ -153,6 +164,9 @@ export function compileSmartPacket(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("BLITZ_SMART_PACKET_INVALID");
   if (!Array.isArray(input.jobs) || input.jobs.length < 1) throw new Error("BLITZ_SMART_PACKET_EMPTY");
   if (input.jobs.length > 4096) throw new Error("BLITZ_SMART_PACKET_TOO_MANY_JOBS");
+  if (/"live_order_enabled"\s*:\s*true/i.test(JSON.stringify(input))) {
+    throw new Error("BLITZ_LIVE_ORDER_FORBIDDEN");
+  }
 
   const planner = validatePlanner(input.planner);
   const original = input.jobs.map((job, index) => {
@@ -170,6 +184,10 @@ export function compileSmartPacket(input) {
   const canonical = [];
 
   for (const job of original) {
+    if (!dedupeEligible(job)) {
+      canonical.push(job);
+      continue;
+    }
     const prior = canonicalByFingerprint.get(job.__fingerprint);
     if (!prior) {
       canonicalByFingerprint.set(job.__fingerprint, job.id);
@@ -177,6 +195,10 @@ export function compileSmartPacket(input) {
       continue;
     }
     aliasToCanonical.set(job.id, prior);
+    const target = canonical.find(item => item.id === prior);
+    if (target) {
+      target.depends_on = [...new Set([...target.depends_on, ...job.depends_on])];
+    }
   }
 
   function resolveAlias(id) {
@@ -250,6 +272,7 @@ export function compileSmartPacket(input) {
       input_jobs: original.length,
       executable_jobs: strippedJobs.length,
       duplicates_removed: original.length - strippedJobs.length,
+      dedupe_policy: "PURE_OR_EXPLICIT_ONLY",
       planner_advisors_present: Object.keys(planner || {}).length,
       planner_runtime_verified: runtimeVerifiedAdvisors,
       dependency_graph_validated: true,
