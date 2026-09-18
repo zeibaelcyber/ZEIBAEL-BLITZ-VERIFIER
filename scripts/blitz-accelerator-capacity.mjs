@@ -93,7 +93,7 @@ page.on("response",(resp)=>{
 const probes=[];
 try{
   await page.goto("http://127.0.0.1:"+PORT+"/",{waitUntil:"domcontentloaded",timeout:15000});
-  await page.evaluate(async()=>{
+  await page.evaluate(()=>{\n    void (async()=>{
     const status=document.getElementById("status");
     window.__bootDiag={
       stage:"IMPORT_START",
@@ -156,6 +156,7 @@ try{
       window.__bootDiag.error=String(e?.stack||e?.message||e).slice(0,2000);
       status.textContent="BOOT_ERROR:"+String(e?.message||e).slice(0,1000);
     }
+    })();
   });
   const deadline=Date.now()+STARTUP_TIMEOUT_MS;
   let diag=null;
