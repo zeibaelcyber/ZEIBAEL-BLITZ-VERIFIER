@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { compileSmartPacket } from './smart-packet.mjs';
 
 const inputPath = process.argv[2];
 if (!inputPath) {
@@ -7,9 +8,12 @@ if (!inputPath) {
   process.exit(2);
 }
 
-const packet = JSON.parse(await readFile(inputPath, 'utf8'));
+const rawPacket = JSON.parse(await readFile(inputPath, 'utf8'));
+const compiled = compileSmartPacket(rawPacket);
+const packet = compiled.packet;
 const jobs = Array.isArray(packet.jobs) ? packet.jobs : [];
 const byId = new Map(jobs.map(j => [j.id, j]));
+const executionRank = new Map(compiled.executionOrder.map((id, index) => [id, index]));
 const state = new Map();
 const startedAt = Date.now();
 const WORKER_THREAD_CEILING_REFERENCE = 1791;
@@ -131,7 +135,8 @@ const running = new Map();
 while (pending.size || running.size) {
   let launched = 0;
 
-  for (const id of [...pending]) {
+  const readyOrder = [...pending].sort((a, b) => (executionRank.get(a) ?? 999999) - (executionRank.get(b) ?? 999999));
+  for (const id of readyOrder) {
     if (running.size >= maxConcurrency) break;
     const job = byId.get(id);
     if (depsSatisfied(job)) {
@@ -174,11 +179,18 @@ while (pending.size || running.size) {
 
 const results = jobs.map(j => state.get(j.id));
 const output = {
-  schema: 'zeibael.acker-accelerator.evidence.v1',
+  schema: 'zeibael.acker-accelerator.evidence.v2',
   task_id: packet.task_id || null,
   objective: packet.objective || null,
-  mode: 'BOUNDED_MAX_READY_PARALLEL',
+  mode: 'SMART_ONE_SHOT_BOUNDED_MAX_READY_PARALLEL',
+  smart_mode: packet.smart_mode,
+  planner: packet.planner || null,
+  input_jobs_total: compiled.diagnostics.input_jobs,
   jobs_total: jobs.length,
+  duplicates_removed: compiled.diagnostics.duplicates_removed,
+  dependency_graph_validated: compiled.diagnostics.dependency_graph_validated,
+  critical_path_scheduling: compiled.diagnostics.critical_path_scheduling,
+  dedupe_aliases: compiled.aliases,
   max_concurrency: maxConcurrency,
   worker_thread_ceiling_reference: WORKER_THREAD_CEILING_REFERENCE,
   webcontainer_safe_parallel_slots: WEBCONTAINER_SAFE_PARALLEL_SLOTS,
