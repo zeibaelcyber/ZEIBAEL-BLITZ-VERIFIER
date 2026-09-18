@@ -10,7 +10,8 @@
     "test": "node src/verify-max.mjs --json",
     "worker-limit": "node src/worker-limit.mjs",
     "capacity:webcontainer": "node src/webcontainer-capacity.mjs",
-    "builder:wave1": "node src/acker-accelerator.mjs examples/builder-wave1-evidence.packet.json"
+    "builder:wave1": "node src/acker-accelerator.mjs examples/builder-wave1-evidence.packet.json",
+    "builder:wave1:summary": "node scripts/run-builder-wave1-evidence.mjs"
   },
   "engines": {
     "node": ">=18"
