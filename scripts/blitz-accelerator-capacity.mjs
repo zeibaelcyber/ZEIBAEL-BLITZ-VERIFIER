@@ -93,7 +93,8 @@ page.on("response",(resp)=>{
 const probes=[];
 try{
   await page.goto("http://127.0.0.1:"+PORT+"/",{waitUntil:"domcontentloaded",timeout:15000});
-  await page.evaluate(()=>{\n    void (async()=>{
+  await page.evaluate(()=>{
+    void (async()=>{
     const status=document.getElementById("status");
     window.__bootDiag={
       stage:"IMPORT_START",
