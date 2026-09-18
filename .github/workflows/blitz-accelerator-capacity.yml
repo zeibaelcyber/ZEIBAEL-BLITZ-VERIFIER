@@ -2,6 +2,10 @@ name: ZEIBAEL Blitz Accelerator Capacity
 # trigger: local-webcontainer-proxy-v1
 
 on:
+  push:
+    paths:
+      - 'scripts/blitz-accelerator-capacity.mjs'
+      - '.github/workflows/blitz-accelerator-capacity.yml'
   workflow_dispatch:
 
 permissions:
