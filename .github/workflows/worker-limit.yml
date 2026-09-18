@@ -1,0 +1,19 @@
+name: ZEIBAEL Direct Worker Maximum
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/worker-limit.yml'
+      - 'src/worker-limit.mjs'
+  workflow_dispatch:
+jobs:
+  worker-limit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Benchmark maximum worker_threads
+        run: node src/worker-limit.mjs
