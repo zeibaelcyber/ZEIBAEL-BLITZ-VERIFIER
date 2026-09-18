@@ -38,7 +38,7 @@ async function boot(){
 }
 async function runCandidate(profile,c,timeoutMs){
   const taskCount=Math.max(c*2,8);
-  const prefix='/cap-'+profile.toLowerCase()+'-'+Date.now()+'-'+Math.random().toString(36).slice(2)+'-';
+  const prefix='cap-'+profile.toLowerCase()+'-'+Date.now()+'-'+Math.random().toString(36).slice(2)+'-';
   for(let i=0;i<taskCount;i++) await wc.fs.writeFile(prefix+i+'.mjs',taskCode(profile,i));
   let cursor=0,completed=0,failed=0;
   const samples=[];
