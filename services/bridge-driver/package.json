@@ -1,0 +1,16 @@
+{
+  "name": "zeibael-blitz-bridge-driver",
+  "version": "1.0.0",
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "stackblitz": {
+    "installDependencies": false,
+    "startCommand": "npm start"
+  }
+}
