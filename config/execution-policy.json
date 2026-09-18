@@ -1,0 +1,18 @@
+{
+  "schema": "zeibael.blitz.execution-policy.v1",
+  "mode": "MAX_PARALLEL",
+  "capability_calibration": false,
+  "default_behavior": "START_ALL_INDEPENDENT_WORK_IMMEDIATELY",
+  "worker_policy": {
+    "independent_tasks": "ALL_AT_ONCE",
+    "dependent_tasks": "RUN_AS_SOON_AS_DEPENDENCIES_PASS",
+    "idle_workers": "DO_NOT_RESERVE",
+    "artificial_worker_cap": "NONE",
+    "overload_recovery": "FAIL_FAST_AND_RETRY_ONLY_FAILED_SCOPE"
+  },
+  "safety": {
+    "live_order_enabled": false,
+    "secrets_in_public_blitz": false,
+    "baseline_locked": "BO-ABSORPTION-1H-P1000-v1.0"
+  }
+}
