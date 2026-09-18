@@ -1,4 +1,5 @@
 name: ZEIBAEL Blitz Accelerator Capacity
+# trigger: local-webcontainer-proxy-v1
 
 on:
   workflow_dispatch:
