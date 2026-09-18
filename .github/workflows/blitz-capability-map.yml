@@ -1,0 +1,30 @@
+name: ZEIBAEL Blitz Capability Map
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/blitz-capability-map-browser.mjs'
+      - '.github/workflows/blitz-capability-map.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  capability-map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install browser harness
+        run: npm install --no-save --no-package-lock puppeteer@24.16.0
+      - name: Run capability map
+        run: node scripts/blitz-capability-map-browser.mjs
+      - name: Upload capability evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: blitz-capability-map
+          path: evidence/blitz-capability-map-latest.json
