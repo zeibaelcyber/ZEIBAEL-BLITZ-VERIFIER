@@ -1,16 +1,31 @@
 {
   "schema": "zeibael.blitz.execution-policy.v1",
-  "mode": "MAX_PARALLEL",
+  "mode": "MAX_PARALLEL_STABLE",
   "capability_calibration": false,
   "default_behavior": "START_ALL_INDEPENDENT_WORK_IMMEDIATELY",
+  "benchmark_reference": {
+    "benchmark_id": "blitz-worker-limit-1789702096605-6evpmf",
+    "status": "EXACT_BOUNDARY_OBSERVED",
+    "max_stable_workers": 1791,
+    "first_failed_worker": 1792,
+    "first_failure": "ready_timeout",
+    "semantics": "UPPER_CAPABILITY_REFERENCE_NOT_MANDATORY_WORKER_COUNT"
+  },
   "worker_policy": {
-    "independent_tasks": "ALL_AT_ONCE",
+    "real_work_target": "MAXIMUM_PRACTICAL_STABLE_UTILIZATION",
+    "independent_tasks": "ALL_AT_ONCE_UP_TO_STABLE_WORKLOAD_CAPACITY",
     "dependent_tasks": "RUN_AS_SOON_AS_DEPENDENCIES_PASS",
-    "idle_workers": "DO_NOT_RESERVE",
+    "idle_workers": "DO_NOT_RESERVE_WHEN_READY_WORK_EXISTS",
     "artificial_worker_cap": "NONE",
-    "overload_recovery": "FAIL_FAST_AND_RETRY_ONLY_FAILED_SCOPE"
+    "conservative_derating": "FORBIDDEN",
+    "force_every_task_to_benchmark_ceiling": false,
+    "exceed_latest_proven_ceiling_without_new_evidence": false,
+    "overload_recovery": "FAIL_FAST_AND_RETRY_ONLY_FAILED_SCOPE",
+    "rebenchmark_every_new_task": false
   },
   "safety": {
+    "zero_spend_required": true,
+    "paid_fallback_allowed": false,
     "live_order_enabled": false,
     "secrets_in_public_blitz": false,
     "baseline_locked": "BO-ABSORPTION-1H-P1000-v1.0"
