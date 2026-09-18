@@ -12,6 +12,12 @@ const jobs = Array.isArray(packet.jobs) ? packet.jobs : [];
 const byId = new Map(jobs.map(j => [j.id, j]));
 const state = new Map();
 const startedAt = Date.now();
+const WORKER_THREAD_CEILING = 1791;
+const requestedConcurrency = Number(packet.max_concurrency ?? packet.concurrency ?? jobs.length || 1);
+const maxConcurrency =
+  Number.isFinite(requestedConcurrency) && requestedConcurrency >= 1
+    ? Math.min(WORKER_THREAD_CEILING, Math.floor(requestedConcurrency))
+    : Math.min(WORKER_THREAD_CEILING, Math.max(1, jobs.length));
 
 function safeText(v, max = 12000) {
   const s = String(v ?? '');
@@ -125,6 +131,7 @@ while (pending.size || running.size) {
   let launched = 0;
 
   for (const id of [...pending]) {
+    if (running.size >= maxConcurrency) break;
     const job = byId.get(id);
     if (depsSatisfied(job)) {
       pending.delete(id);
@@ -169,8 +176,10 @@ const output = {
   schema: 'zeibael.acker-accelerator.evidence.v1',
   task_id: packet.task_id || null,
   objective: packet.objective || null,
-  mode: 'MAX_READY_PARALLEL',
+  mode: 'BOUNDED_MAX_READY_PARALLEL',
   jobs_total: jobs.length,
+  max_concurrency: maxConcurrency,
+  worker_thread_ceiling_reference: WORKER_THREAD_CEILING,
   pass: results.filter(x => x?.status === 'PASS').length,
   failed: results.filter(x => x?.status === 'FAILED').length,
   blocked: results.filter(x => x?.status === 'BLOCKED').length,
