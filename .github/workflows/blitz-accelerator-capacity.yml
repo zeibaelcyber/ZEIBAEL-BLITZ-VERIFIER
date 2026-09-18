@@ -20,6 +20,6 @@ jobs:
         with:
           node-version: '24'
       - name: Install browser harness
-        run: npm install --no-save --no-package-lock puppeteer@24.16.0
+        run: npm install --no-save --no-package-lock @sparticuz/chromium@153.0.0 puppeteer-core@25.11.0
       - name: Find exact max non-timeout accelerator slots
         run: node scripts/blitz-accelerator-capacity.mjs
