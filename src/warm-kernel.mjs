@@ -4,8 +4,8 @@ const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});
 const MAX_OUTPUT=6000;
 const PREWARM_TARGET=Math.max(1,Math.min(8,Number(process.env.ZEIBAEL_KERNEL_PREWARM)||4));
 const PREPARE_TIMEOUT_MS=5000;
-const idle=[];
-let preparing=0,poolSpawned=0,poolUses=0,poolColdFallbacks=0,poolReplenishments=0;
+const idle=[],preparedWaiters=[];
+let preparing=0,poolSpawned=0,poolUses=0,poolColdFallbacks=0,poolReplenishments=0,poolWaitedForReplenish=0;
 const BOOTSTRAP=`
 import { parentPort } from "node:worker_threads";
 parentPort.once("message", async (msg) => {
@@ -25,7 +25,26 @@ parentPort.postMessage({type:"ready"});
 `;
 const BOOTSTRAP_URL=new URL("data:text/javascript;base64,"+Buffer.from(BOOTSTRAP,"utf8").toString("base64"));
 function trim(s){return String(s||"").slice(-MAX_OUTPUT)}
-function poolState(){return {target:PREWARM_TARGET,ready:idle.length,preparing,spawned:poolSpawned,prewarmed_uses:poolUses,cold_fallbacks:poolColdFallbacks,replenishments:poolReplenishments}}
+function poolState(){return {target:PREWARM_TARGET,ready:idle.length,preparing,waiters:preparedWaiters.length,spawned:poolSpawned,prewarmed_uses:poolUses,cold_fallbacks:poolColdFallbacks,replenishments:poolReplenishments,waited_for_replenish:poolWaitedForReplenish}}
+function offerPrepared(worker){
+  const waiter=preparedWaiters.shift();
+  if(waiter){waiter.resolve(worker);return}
+  if(idle.length<PREWARM_TARGET)idle.push(worker);
+  else try{void worker.terminate().catch(()=>{})}catch{}
+}
+async function waitForPrepared(){
+  if(idle.length)return idle.pop();
+  if(preparing<1)return null;
+  poolWaitedForReplenish++;
+  return await new Promise(resolve=>{
+    const entry={resolve:(worker)=>{clearTimeout(timer);resolve(worker)}};
+    const timer=setTimeout(()=>{
+      const i=preparedWaiters.indexOf(entry);if(i>=0)preparedWaiters.splice(i,1);
+      resolve(null)
+    },PREPARE_TIMEOUT_MS+1000);
+    preparedWaiters.push(entry)
+  })
+}
 function spawnPrepared(){
   preparing++;poolSpawned++;
   return new Promise((resolve,reject)=>{
@@ -51,23 +70,28 @@ function spawnPrepared(){
 function scheduleReplenish(){
   while(idle.length+preparing<PREWARM_TARGET){
     poolReplenishments++;
-    void spawnPrepared().then(worker=>{
-      if(idle.length<PREWARM_TARGET)idle.push(worker);
-      else try{worker.terminate()}catch{}
-    }).catch(()=>{});
+    void spawnPrepared().then(offerPrepared).catch(()=>{});
   }
 }
 async function initializePool(){
   const rows=await Promise.allSettled(Array.from({length:PREWARM_TARGET},()=>spawnPrepared()));
-  for(const row of rows)if(row.status==="fulfilled")idle.push(row.value);
+  for(const row of rows)if(row.status==="fulfilled")offerPrepared(row.value);
   scheduleReplenish();
 }
 async function acquireWorker(){
-  const worker=idle.pop();
+  let worker=idle.pop();
   if(worker){
     poolUses++;
     scheduleReplenish();
     return {worker,prewarmed:true};
+  }
+  if(preparing>0){
+    worker=await waitForPrepared();
+    if(worker){
+      poolUses++;
+      scheduleReplenish();
+      return {worker,prewarmed:true};
+    }
   }
   poolColdFallbacks++;
   const cold=await spawnPrepared();
@@ -102,7 +126,7 @@ async function execute(req){
     };
     const timer=setTimeout(()=>finish(false,124,"timeout"),timeout);
     worker.once("error",e=>finish(false,1,e&&e.stack||e&&e.message||String(e)));
-    worker.once("exit",code=>finish(code===0,code,code===0?undefined:"worker_exit_"+code));
+    worker.once("exit",code=>finish(false,Number(code)||1,"worker_exit_before_done_"+code));
     worker.on("message",msg=>{
       if(msg?.type!=="done")return;
       finish(msg.ok===true,msg.ok===true?0:1,msg.error||undefined);
