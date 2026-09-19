@@ -9,6 +9,7 @@ const API_VERSION = "1.6.4";
 const FIXTURE = "fixtures/browser-fabric-v19.html";
 const EVIDENCE = "evidence/browser-fabric-real-host.json";
 const LIVE_EDGE_URL = "https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-stackblitz-direct?lane=stackblitz-compute-v1";
+// live-edge-generation: string-raw-v29
 const PRIVATE_SOURCE_COMMIT = "32b91a7850194a25f81dad3fdf3b51ad8b111d81";
 const PRIVATE_SOURCE_BLOB = "94009267e975b20db74a899741fa3e50f2945759";
 
