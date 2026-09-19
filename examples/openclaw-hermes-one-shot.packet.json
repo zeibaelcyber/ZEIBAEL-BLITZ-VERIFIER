@@ -1,19 +1,19 @@
 {
   "task_id": "openclaw-hermes-blitz-one-shot",
-  "objective": "Compile once, execute once, return compact evidence without planner loops",
+  "objective": "Compile once with deterministic local advisor kernel, execute once, return compact evidence without planner loops",
   "max_concurrency": 32,
   "planner": {
     "openclaw": {
       "role": "PLAN_COMPACTOR",
       "runtime_verified": false,
       "advisory_only": true,
-      "trace_id": "openclaw-preblitz"
+      "trace_id": "openclaw-bypassed-unverified"
     },
     "hermes": {
-      "role": "TASK_SHARDER",
+      "role": "PREVALIDATOR",
       "runtime_verified": false,
       "advisory_only": true,
-      "trace_id": "hermes-preblitz"
+      "trace_id": "hermes-bypassed-unverified"
     }
   },
   "jobs": [
@@ -30,12 +30,18 @@
     {
       "id": "prepare",
       "type": "inline",
+      "depends_on": [
+        "validate_contract"
+      ],
       "code": "return {ok:true,stage:'prepare'}"
     },
     {
       "id": "final",
       "type": "inline",
-      "depends_on": ["validate_contract_duplicate", "prepare"],
+      "depends_on": [
+        "validate_contract_duplicate",
+        "prepare"
+      ],
       "code": "return {ok:true,stage:'final',live_order_enabled:false}"
     }
   ]
