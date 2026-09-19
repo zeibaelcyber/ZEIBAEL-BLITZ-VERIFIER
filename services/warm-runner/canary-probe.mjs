@@ -58,6 +58,10 @@ try{
     ?.map(x=>Number(String(x.output||"").match(/u[12]:(\d+)/)?.[1]||0))
     ?.filter(Boolean) || [];
   const slotUniqueBeforeLeader=slotDupTs>0 && slotUniqueTs.length===2 && Math.min(...slotUniqueTs)<slotDupTs;
+  const slotUniqueRows=slotProbe.body?.results?.filter(x=>x.id==="slot-u1"||x.id==="slot-u2")||[];
+  const slotUniqueElapsed=slotUniqueRows.map(x=>Number(x?.elapsed_ms)).filter(Number.isFinite);
+  const slotUniqueTailLimitMs=350;
+  const slotUniqueTailOk=slotUniqueElapsed.length===2 && Math.max(...slotUniqueElapsed)<=slotUniqueTailLimitMs;
   const governorNegative=await burst([
     {id:"g-ok-1",code:"console.log(1)",kernel_safe:true,cache_safe:false,timeout_ms:1000},
     {id:"g-ok-2",code:"console.log(2)",kernel_safe:true,cache_safe:false,timeout_ms:1000},
@@ -91,6 +95,7 @@ try{
     Number(slotProbe.body?.executed)===3 &&
     Number(slotProbe.body?.cache?.coalesced)===1 &&
     slotUniqueBeforeLeader===true &&
+    slotUniqueTailOk===true &&
     h2.slot_preserving_coalescing===true &&
     Number(h2.prewarm_pool?.cold_fallbacks)===0 &&
     governorNegative.status===422 && governorNegative.body?.ok===false &&
@@ -122,7 +127,12 @@ try{
       pool:h2.prewarm_pool||h1.prewarm_pool||null
     },
     slot_preserving_coalescing:{
-      ok:slotUniqueBeforeLeader,
+      ok:slotUniqueBeforeLeader&&slotUniqueTailOk,
+      ordering_ok:slotUniqueBeforeLeader,
+      tail_ok:slotUniqueTailOk,
+      tail_limit_ms:slotUniqueTailLimitMs,
+      unique_elapsed_ms:slotUniqueElapsed,
+      max_unique_elapsed_ms:slotUniqueElapsed.length?Math.max(...slotUniqueElapsed):null,
       duplicate_leader_timestamp_ms:slotDupTs,
       unique_timestamps_ms:slotUniqueTs,
       probe:slotProbe.body
