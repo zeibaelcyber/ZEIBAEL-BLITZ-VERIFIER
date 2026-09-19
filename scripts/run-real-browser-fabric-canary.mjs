@@ -218,7 +218,8 @@ async function browserCanary() {
       workload_profile:"LIGHT"
     });
     const coldPrimeRow = coldPrimeRun?.results?.[0] || null;
-    const coldPrimeTaskPid = Number(String(coldPrimeRow?.output||"").trim().split(/\s+/).pop()) || null;
+    const coldPrimeTaskPidText = String(coldPrimeRow?.output||"").replace(/\x1b\[[0-9;]*m/g,"").trim();
+    const coldPrimeTaskPid = Number((coldPrimeTaskPidText.match(/\d+/)||[])[0]) || null;
     const coldPrimeRuntimeGate =
       coldProcessPrime?.ok === true &&
       coldProcessPrime?.state === "READY" &&
