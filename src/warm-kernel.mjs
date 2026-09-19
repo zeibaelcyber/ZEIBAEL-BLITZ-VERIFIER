@@ -7,7 +7,7 @@ const PREPARE_TIMEOUT_MS=5000;
 const idle=[];
 let preparing=0,poolSpawned=0,poolUses=0,poolColdFallbacks=0,poolReplenishments=0;
 const BOOTSTRAP=`
-const { parentPort } = require("node:worker_threads");
+import { parentPort } from "node:worker_threads";
 parentPort.once("message", async (msg) => {
   let ok=true,error=null;
   try {
@@ -23,12 +23,13 @@ parentPort.once("message", async (msg) => {
 });
 parentPort.postMessage({type:"ready"});
 `;
+const BOOTSTRAP_URL=new URL("data:text/javascript;base64,"+Buffer.from(BOOTSTRAP,"utf8").toString("base64"));
 function trim(s){return String(s||"").slice(-MAX_OUTPUT)}
 function poolState(){return {target:PREWARM_TARGET,ready:idle.length,preparing,spawned:poolSpawned,prewarmed_uses:poolUses,cold_fallbacks:poolColdFallbacks,replenishments:poolReplenishments}}
 function spawnPrepared(){
   preparing++;poolSpawned++;
   return new Promise((resolve,reject)=>{
-    const worker=new Worker(BOOTSTRAP,{eval:true,stdout:true,stderr:true});
+    const worker=new Worker(BOOTSTRAP_URL,{type:"module",stdout:true,stderr:true});
     let settled=false;
     const timer=setTimeout(()=>{
       if(settled)return;settled=true;
