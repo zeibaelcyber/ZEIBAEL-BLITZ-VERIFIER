@@ -73,10 +73,16 @@ const health=(await fetchJson(healthUrl)).body;
 if(health.ok!==true) fail('health_not_ok');
 if(health.live_order_enabled!==false) fail('health_live_order_enabled');
 if(health.secrets_exposed!==false) fail('health_secrets_exposed');
-const registry=(health.checks||[]).find(x=>x?.name==='blitz.primary_registry');
+const checks=health.checks||[];
+const registry=checks.find(x=>x?.name==='blitz.primary_registry');
 if(registry?.ok!==true) fail('primary_registry_not_ok');
 if(Number(registry?.detail?.max_concurrency)!==expectedGlobal) fail('health_global_concurrency');
-const browser=(health.checks||[]).find(x=>x?.name==='blitz.browser_fabric_runtime');
+if(inv.required?.warm_runner_runtime_verified===true && registry?.detail?.runtime_verified!==true) fail('warm_runner_runtime_not_verified');
+const zeroSpend=checks.find(x=>x?.name==='supabase.zero_spend_guard');
+if(inv.required?.zero_spend===true && zeroSpend?.ok!==true) fail('zero_spend_guard_not_ok');
+const warmOidc=checks.find(x=>x?.name==='blitz.warm_runner_persisted_oidc_sentinel');
+if(inv.required?.oidc_sentinel_required===true && warmOidc?.ok!==true) fail('warm_runner_oidc_sentinel_not_ok');
+const browser=checks.find(x=>x?.name==='blitz.browser_fabric_runtime');
 if(browser?.ok!==true || browser?.required!==true) fail('browser_fabric_required_runtime_not_ok');
 
 const directUrl='https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-stackblitz-direct?lane=stackblitz-compute-v1';
@@ -101,6 +107,8 @@ const evidence={
     required_pass:health.summary?.pass??null,
     required_total:health.summary?.total_required??null,
     primary_registry_ok:registry?.ok===true,
+    zero_spend_ok:zeroSpend?.ok===true,
+    warm_oidc_ok:warmOidc?.ok===true,
     browser_fabric_required_ok:browser?.ok===true
   },
   live_edge:{
