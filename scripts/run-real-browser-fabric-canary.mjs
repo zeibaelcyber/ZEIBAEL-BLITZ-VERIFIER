@@ -81,6 +81,22 @@ async function waitJson(url, timeoutMs = 15000) {
   }
   throw last || new Error("TIMEOUT:" + url);
 }
+async function runtimeEvaluateWhenContextReady(cdp, params, timeoutMs = 5000) {
+  const started = Date.now();
+  let last;
+  while (Date.now() - started < timeoutMs) {
+    try {
+      return await cdp.send("Runtime.evaluate", params);
+    } catch (e) {
+      last = e;
+      const msg = String(e?.message || e);
+      if (!/default execution context|execution context (?:was )?destroyed|Cannot find context/i.test(msg)) throw e;
+      await sleep(100);
+    }
+  }
+  throw last || new Error("CDP_EXECUTION_CONTEXT_TIMEOUT");
+}
+
 function connectCdp(wsUrl) {
   const ws = new WebSocket(wsUrl);
   let seq = 0;
@@ -320,10 +336,10 @@ try {
   let ready = false;
   let lastState = null;
   while (Date.now() - readyStarted < 45000) {
-    const r = await cdp.send("Runtime.evaluate", {
+    const r = await runtimeEvaluateWhenContextReady(cdp, {
       expression: 'JSON.stringify({ready:typeof window.zeibaelProbe==="function"&&typeof window.zeibaelEnsureCacheDb==="function"&&typeof window.zeibaelWatch==="function"&&typeof window.zeibaelRun==="function"&&typeof window.zeibaelExportDigest==="function"&&typeof window.zeibaelRunEnvelope==="function"&&typeof window.zeibaelResetRuntime==="function",status:document.getElementById("status")?.textContent||null,coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,apis:{cacheDb:typeof window.zeibaelEnsureCacheDb,watch:typeof window.zeibaelWatch,run:typeof window.zeibaelRun,exportDigest:typeof window.zeibaelExportDigest,envelope:typeof window.zeibaelRunEnvelope,reset:typeof window.zeibaelResetRuntime}})',
       returnByValue: true,
-    });
+    }, 5000);
     if (typeof r?.result?.value === "string") {
       lastState = JSON.parse(r.result.value);
       if (lastState.ready === true && lastState.coi === true && lastState.sab === "function") { ready = true; break; }
