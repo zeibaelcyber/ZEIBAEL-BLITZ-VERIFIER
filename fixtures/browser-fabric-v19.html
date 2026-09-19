@@ -183,6 +183,7 @@ function openCacheDb(){
   });
   return cacheDbPromise
 }
+window.zeibaelEnsureCacheDb=async()=>Boolean(await openCacheDb());
 async function idbGet(key){
   const db=await openCacheDb();if(!db)return null;
   return await new Promise(resolve=>{
