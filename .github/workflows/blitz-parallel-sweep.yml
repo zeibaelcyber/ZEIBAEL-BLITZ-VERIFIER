@@ -1,0 +1,77 @@
+name: Blitz Parallel Optimization Sweep
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "services/warm-runner/**"
+      - "scripts/**"
+      - "fixtures/browser-fabric-v19.html"
+      - ".github/workflows/blitz-parallel-sweep.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blitz-parallel-sweep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  invariant-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Verifier + permanent invariants
+        run: |
+          npm test
+          node scripts/blitz-invariants.mjs
+
+  warm-kernel-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Warm kernel isolation and worker lifecycle
+        run: npm run warm-kernel:selftest
+
+  warm-runner-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Warm Runner cache coalescing retry fairness
+        run: npm run warm-runner:selftest
+
+  fabric-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Blitz Free Fabric deterministic selftest
+        run: npm run fabric:selftest
+
+  packet-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Smart packet routing selftest
+        run: npm run smart:selftest
