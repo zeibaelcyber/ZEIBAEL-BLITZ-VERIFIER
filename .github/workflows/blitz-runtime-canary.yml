@@ -131,30 +131,26 @@ jobs:
             });
           ')"
           test -n "${OIDC_TOKEN}"
-          HTTP_STATUS="$(curl -sS \
-            -o evidence/browser-fabric-ingest-response.json \
-            -w '%{http_code}' \
+          curl -fsS \
             -X POST "${SENTINEL_URL}" \
             -H "Authorization: Bearer ${OIDC_TOKEN}" \
             -H "Content-Type: application/json" \
-            --data-binary @evidence/browser-fabric-sentinel-request.json)"
-          node - "${HTTP_STATUS}" <<'NODE'
-          const fs=require("node:fs");
-          const status=Number(process.argv[2]);
-          const j=JSON.parse(fs.readFileSync("evidence/browser-fabric-ingest-response.json","utf8"));
-          if(status>=200&&status<300&&j.ok===true&&j.accepted===true&&j.promotion_automatic===false){
-            console.log(JSON.stringify({accepted:true,capability_key:j.capability_key,promotion_automatic:false,sentinel:j.sentinel}));
-            process.exit(0);
-          }
-          const evidence=JSON.parse(fs.readFileSync("evidence/browser-fabric-real-host.json","utf8"));
-          const knownStaleValidator=status===403&&j.error==="CONCURRENCY_INVARIANT_FAILED"&&evidence.ok===true&&Number(evidence?.probe?.max_concurrency)===64;
-          if(knownStaleValidator){
-            console.log(JSON.stringify({accepted:false,deferred_ingest:true,reason:"STALE_57_CONCURRENCY_VALIDATOR",runtime_evidence_ok:true,max_concurrency:64}));
-            process.exit(0);
-          }
-          console.error(JSON.stringify({status,response:j}));
-          process.exit(1);
-          NODE
+            --data-binary @evidence/browser-fabric-sentinel-request.json \
+            > evidence/browser-fabric-ingest-response.json
+          node -e '
+            const fs=require("node:fs");
+            const j=JSON.parse(fs.readFileSync("evidence/browser-fabric-ingest-response.json","utf8"));
+            if(j.ok!==true||j.accepted!==true||j.promotion_automatic!==false){
+              console.error(JSON.stringify(j));
+              process.exit(1);
+            }
+            console.log(JSON.stringify({
+              accepted:j.accepted,
+              capability_key:j.capability_key,
+              promotion_automatic:j.promotion_automatic,
+              sentinel:j.sentinel
+            }));
+          '
 
       - name: Print safe Browser Fabric canary evidence
         if: always()
