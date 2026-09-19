@@ -20,17 +20,37 @@ let liveEdgeStatus = 0;
 let liveEdgeSha256 = "";
 let liveEdgeFixtureExactMatch = false;
 let runtimeHtmlSource = "FIXTURE_FALLBACK";
-try {
-  const edge = await fetch(LIVE_EDGE_URL, { headers: { accept: "text/html,*/*" } });
-  liveEdgeStatus = edge.status;
-  const edgeBody = await edge.text();
-  liveEdgeSha256 = createHash("sha256").update(edgeBody, "utf8").digest("hex");
-  liveEdgeFixtureExactMatch = edgeBody === fixtureHtml;
-  if (edge.ok && edgeBody.includes("window.zeibaelRun") && edgeBody.includes("WebContainer")) {
-    html = edgeBody;
-    runtimeHtmlSource = "LIVE_EDGE";
+let liveEdgeAttempts = 0;
+let liveEdgeLastError = null;
+for (let attempt = 1; attempt <= 3 && runtimeHtmlSource !== "LIVE_EDGE"; attempt++) {
+  liveEdgeAttempts = attempt;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const edge = await fetch(LIVE_EDGE_URL, {
+      headers: { accept: "text/html,*/*" },
+      signal: controller.signal
+    });
+    liveEdgeStatus = edge.status;
+    const edgeBody = await edge.text();
+    liveEdgeSha256 = createHash("sha256").update(edgeBody, "utf8").digest("hex");
+    liveEdgeFixtureExactMatch = edgeBody === fixtureHtml;
+    if (edge.ok && edgeBody.includes("window.zeibaelRun") && edgeBody.includes("WebContainer")) {
+      html = edgeBody;
+      runtimeHtmlSource = "LIVE_EDGE";
+      liveEdgeLastError = null;
+    } else {
+      liveEdgeLastError = "LIVE_EDGE_INVALID_HTTP_OR_BODY:" + edge.status;
+    }
+  } catch (error) {
+    liveEdgeLastError = String(error?.message || error);
+  } finally {
+    clearTimeout(timer);
   }
-} catch {}
+  if (runtimeHtmlSource !== "LIVE_EDGE" && attempt < 3) {
+    await new Promise(resolve => setTimeout(resolve, 250 * attempt));
+  }
+}
 
 const moduleMarker = '<script type="module">';
 const moduleStart = html.indexOf(moduleMarker);
@@ -373,6 +393,8 @@ try {
     live_edge_http_status: liveEdgeStatus,
     live_edge_html_sha256: liveEdgeSha256,
     live_edge_fixture_exact_match: liveEdgeFixtureExactMatch,
+    live_edge_attempts: liveEdgeAttempts,
+    live_edge_last_error: liveEdgeLastError,
     ...result,
   };
   await writeFile(EVIDENCE, JSON.stringify(evidence, null, 2) + "\n", "utf8");
