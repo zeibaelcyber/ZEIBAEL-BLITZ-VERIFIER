@@ -46,6 +46,18 @@ try{
     {id:"c3",code:"console.log('coalesce-proof-20260919')",kernel_safe:true,cache_safe:true,timeout_ms:1000},
     {id:"c4",code:"console.log('coalesce-proof-20260919')",kernel_safe:true,cache_safe:true,timeout_ms:1000}
   ],4,"LIGHT");
+  const slotProbe=await burst([
+    {id:"slot-dup-1",code:"await new Promise(r=>setTimeout(r,450));console.log('dup:'+Date.now())",kernel_safe:true,cache_safe:true,timeout_ms:1500},
+    {id:"slot-dup-2",code:"await new Promise(r=>setTimeout(r,450));console.log('dup:'+Date.now())",kernel_safe:true,cache_safe:true,timeout_ms:1500},
+    {id:"slot-u1",code:"console.log('u1:'+Date.now())",kernel_safe:true,cache_safe:false,timeout_ms:1500},
+    {id:"slot-u2",code:"console.log('u2:'+Date.now())",kernel_safe:true,cache_safe:false,timeout_ms:1500}
+  ],2,"LIGHT");
+  const slotDupTs=Number(String(slotProbe.body?.results?.find(x=>x.id==="slot-dup-1")?.output||"").match(/dup:(\d+)/)?.[1]||0);
+  const slotUniqueTs=slotProbe.body?.results
+    ?.filter(x=>x.id==="slot-u1"||x.id==="slot-u2")
+    ?.map(x=>Number(String(x.output||"").match(/u[12]:(\d+)/)?.[1]||0))
+    ?.filter(Boolean) || [];
+  const slotUniqueBeforeLeader=slotDupTs>0 && slotUniqueTs.length===2 && Math.min(...slotUniqueTs)<slotDupTs;
   const governorNegative=await burst([
     {id:"g-ok-1",code:"console.log(1)",kernel_safe:true,cache_safe:false,timeout_ms:1000},
     {id:"g-ok-2",code:"console.log(2)",kernel_safe:true,cache_safe:false,timeout_ms:1000},
@@ -71,6 +83,11 @@ try{
     Number(coalesceProbe.body?.executed)===1 &&
     Number(coalesceProbe.body?.attempts)===1 &&
     Number(coalesceProbe.body?.cache?.coalesced)===3 &&
+    slotProbe.status===200 && slotProbe.body?.ok===true &&
+    Number(slotProbe.body?.executed)===3 &&
+    Number(slotProbe.body?.cache?.coalesced)===1 &&
+    slotUniqueBeforeLeader===true &&
+    h2.slot_preserving_coalescing===true &&
     governorNegative.status===422 && governorNegative.body?.ok===false &&
     governorNegative.body?.adaptive_governor?.enabled===true &&
     governorNegative.body?.adaptive_governor?.downshifted===true &&
@@ -92,6 +109,12 @@ try{
     first:first.body,
     second:second.body,
     in_flight_coalescing:coalesceProbe.body,
+    slot_preserving_coalescing:{
+      ok:slotUniqueBeforeLeader,
+      duplicate_leader_timestamp_ms:slotDupTs,
+      unique_timestamps_ms:slotUniqueTs,
+      probe:slotProbe.body
+    },
     adaptive_governor_negative_control:governorNegative.body,
     broker:broker.body,
     health:h2,
