@@ -116,14 +116,28 @@ async function snapshotGet(key){
   return await new Promise(resolve=>{try{const r=db.transaction(SNAPSHOT_STORE,'readonly').objectStore(SNAPSHOT_STORE).get(key);r.onsuccess=()=>resolve(r.result||null);r.onerror=()=>resolve(null)}catch{resolve(null)}})
 }
 async function snapshotSet(key,tree){
-  const db=await openSnapshotDb();if(!db)return false;
-  return await new Promise(resolve=>{try{const tx=db.transaction(SNAPSHOT_STORE,'readwrite');tx.objectStore(SNAPSHOT_STORE).put({key,tree,stored_at:Date.now()});tx.oncomplete=()=>resolve(true);tx.onerror=()=>resolve(false);tx.onabort=()=>resolve(false)}catch{resolve(false)}})
+  const db=await openSnapshotDb();if(!db){pushRuntimeEvent('snapshot_db_unavailable',{key});return false}
+  return await new Promise(resolve=>{
+    try{
+      const tree_json=JSON.stringify(tree);
+      const tx=db.transaction(SNAPSHOT_STORE,'readwrite');
+      tx.objectStore(SNAPSHOT_STORE).put({key,tree_json,stored_at:Date.now()});
+      tx.oncomplete=()=>resolve(true);
+      tx.onerror=()=>{pushRuntimeEvent('snapshot_store_failed',{key,message:String(tx.error?.message||tx.error||'transaction_error')});resolve(false)};
+      tx.onabort=()=>{pushRuntimeEvent('snapshot_store_aborted',{key,message:String(tx.error?.message||tx.error||'transaction_abort')});resolve(false)}
+    }catch(e){pushRuntimeEvent('snapshot_store_exception',{key,message:String(e?.message||e)});resolve(false)}
+  })
 }
 async function hydrateKernelFiles(c,root){
   const key='warm-kernel-v1';
   const snap=await snapshotGet(key);
-  if(snap?.tree){
-    try{await c.mount(snap.tree,{mountPoint:root});snapshotHits++;pushRuntimeEvent('snapshot_hit',{key});return {source:'SNAPSHOT'}}
+  let snapTree=snap?.tree||null;
+  if(!snapTree&&typeof snap?.tree_json==='string'){
+    try{snapTree=JSON.parse(snap.tree_json)}
+    catch(e){pushRuntimeEvent('snapshot_parse_failed',{key,message:String(e?.message||e)})}
+  }
+  if(snapTree){
+    try{await c.mount(snapTree,{mountPoint:root});snapshotHits++;pushRuntimeEvent('snapshot_hit',{key});return {source:'SNAPSHOT'}}
     catch(e){pushRuntimeEvent('snapshot_mount_failed',{message:String(e?.message||e)})}
   }
   snapshotMisses++;
