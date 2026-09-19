@@ -90,7 +90,8 @@ try{
     first.body?.results?.every(x=>x.worker_mode==="PREWARMED_ONE_SHOT_WORKER") &&
     first.body?.results?.every(x=>Number(x.elapsed_ms)<=100) &&
     h1.prewarmed_one_shot_workers===true &&
-    Number(h1.prewarm_pool?.target)>=1 &&
+    Number(h1.prewarm_pool?.target)>=2 &&
+    Number(h1.prewarm_pool?.ready_target)>=2 &&
     slotProbe.status===200 && slotProbe.body?.ok===true &&
     Number(slotProbe.body?.executed)===3 &&
     Number(slotProbe.body?.cache?.coalesced)===1 &&
@@ -124,7 +125,9 @@ try{
       first_task_elapsed_ms:first.body?.results?.map(x=>x.elapsed_ms)||[],
       max_first_task_ms:100,
       no_cold_fallbacks:Number(h2.prewarm_pool?.cold_fallbacks)===0,
-      pool:h2.prewarm_pool||h1.prewarm_pool||null
+      pool:h2.prewarm_pool||h1.prewarm_pool||null,
+      minimum_ready_target:2,
+      ready_floor_ok:Number(h2.prewarm_pool?.ready_target||h1.prewarm_pool?.ready_target)>=2
     },
     slot_preserving_coalescing:{
       ok:slotUniqueBeforeLeader&&slotUniqueTailOk,
