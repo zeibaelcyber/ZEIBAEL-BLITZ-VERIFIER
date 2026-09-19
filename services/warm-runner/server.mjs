@@ -138,31 +138,86 @@ function normalizeTasks(tasks){
 }
 async function runTasks(tasks,requestedConcurrency,workloadProfile){
   const normalized=normalizeTasks(tasks),results=new Array(normalized.length);
-  let hits=0,misses=0,writes=0,executed=0,cursor=0;
+  let hits=0,misses=0,writes=0,executed=0,attempts=0,cursor=0;
   const selected=profileCap(workloadProfile);
   const effective=Math.max(1,Math.min(MAX_CONCURRENCY,selected.cap,Number(requestedConcurrency)||normalized.length,normalized.length));
-  async function worker(){
-    for(;;){
-      const i=cursor++;if(i>=normalized.length)return;
-      const task=normalized[i],key=cacheKey(task);
-      if(key){
-        const hit=cache.get(key);
-        if(hit?.result?.ok===true){hits++;results[i]={...hit.result,id:task.id,cache_hit:true,elapsed_ms:0};continue}
-        misses++;
-      }
-      let row;
-      try{row=await callTask(task)}
-      catch(e){row={id:task.id,ok:false,exit_code:1,elapsed_ms:0,output:"",error:"TASK_TRANSPORT_ERROR:"+String(e?.message||e)}}
-      executed++;
-      const result={id:task.id,ok:row.ok===true,exit_code:row.exit_code,elapsed_ms:row.elapsed_ms,output:String(row.output||"").slice(-6000),error:row.error||null,cache_hit:false,execution_mode:"PERSISTENT_WARM_KERNEL"};
-      results[i]=result;
-      if(key&&result.ok){cache.set(key,result,DEFAULT_TTL);writes++}
+
+  async function executeIndex(i,mode="INITIAL"){
+    const task=normalized[i],key=cacheKey(task);
+    if(mode==="INITIAL"&&key){
+      const hit=cache.get(key);
+      if(hit?.result?.ok===true){hits++;results[i]={...hit.result,id:task.id,cache_hit:true,elapsed_ms:0};return}
+      misses++;
     }
+    let row;
+    try{row=await callTask(task)}
+    catch(e){row={id:task.id,ok:false,exit_code:1,elapsed_ms:0,output:"",error:"TASK_TRANSPORT_ERROR:"+String(e?.message||e)}}
+    attempts++;
+    if(mode==="INITIAL")executed++;
+    const result={
+      id:task.id,
+      ok:row.ok===true,
+      exit_code:row.exit_code,
+      elapsed_ms:row.elapsed_ms,
+      output:String(row.output||"").slice(-6000),
+      error:row.error||null,
+      cache_hit:false,
+      execution_mode:mode==="INITIAL"?"PERSISTENT_WARM_KERNEL":"PERSISTENT_WARM_KERNEL_ADAPTIVE_RETRY"
+    };
+    results[i]=result;
+    if(key&&result.ok){cache.set(key,result,DEFAULT_TTL);writes++}
   }
-  await Promise.all(Array.from({length:effective},worker));
+
+  async function runIndexes(indexes,concurrency,mode){
+    let next=0;
+    async function worker(){
+      for(;;){
+        const pos=next++;if(pos>=indexes.length)return;
+        await executeIndex(indexes[pos],mode);
+      }
+    }
+    await Promise.all(Array.from({length:Math.max(1,Math.min(concurrency,indexes.length))},worker));
+  }
+
+  const initialIndexes=normalized.map((_,i)=>i);
+  await runIndexes(initialIndexes,effective,"INITIAL");
+
+  const transient=/timeout|transport|kernel|worker_exit|resource|temporar/i;
+  const retryIndexes=[];
+  for(let i=0;i<results.length;i++){
+    const row=results[i];
+    if(row?.ok===false&&transient.test(String(row.error||"")))retryIndexes.push(i);
+  }
+  const retryConcurrency=retryIndexes.length?Math.max(1,Math.floor(effective/2)):0;
+  let recoveredTasks=0;
+  if(retryIndexes.length){
+    await runIndexes(retryIndexes,retryConcurrency,"ADAPTIVE_RETRY");
+    for(const i of retryIndexes)if(results[i]?.ok===true)recoveredTasks++;
+  }
+
   await cache.flush();
-  return {ok:results.every(x=>x?.ok===true),results,concurrency:effective,workload_profile:selected.profile,profile_cap:selected.cap,executed,cache:{hits,misses,writes,entries:cache.size()}};
+  return {
+    ok:results.every(x=>x?.ok===true),
+    results,
+    concurrency:effective,
+    workload_profile:selected.profile,
+    profile_cap:selected.cap,
+    executed,
+    attempts,
+    adaptive_governor:{
+      enabled:true,
+      initial_concurrency:effective,
+      downshifted:retryIndexes.length>0,
+      retry_concurrency:retryConcurrency,
+      retried_tasks:retryIndexes.length,
+      recovered_tasks:recoveredTasks,
+      max_retry_waves:1,
+      retry_scope:"TRANSIENT_FAILED_TASKS_ONLY"
+    },
+    cache:{hits,misses,writes,entries:cache.size()}
+  };
 }
+
 async function readJson(req){
   const chunks=[];let size=0;
   for await(const c of req){
