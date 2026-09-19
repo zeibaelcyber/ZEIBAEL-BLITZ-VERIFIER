@@ -13,7 +13,7 @@ const MAX_TOTAL_CODE_BYTES = 8 * 1024 * 1024;
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_TASK_TIMEOUT_MS = 15_000;
-const PROFILE_CAPS = Object.freeze({ LIGHT: 17, IO: 23, BUILD_TEST: 25, CPU_HEAVY: 39 });
+const PROFILE_CAPS = Object.freeze({ LIGHT: 18, IO: 29, BUILD_TEST: 32, CPU_HEAVY: 39 });
 function profileCap(value) {
   const p = String(value || '').toUpperCase();
   return { profile: Object.prototype.hasOwnProperty.call(PROFILE_CAPS, p) ? p : 'GENERIC', cap: Object.prototype.hasOwnProperty.call(PROFILE_CAPS, p) ? PROFILE_CAPS[p] : MAX_CONCURRENCY };
