@@ -22,6 +22,7 @@ const KERNEL_PATH=path.resolve(here,"../../src/warm-kernel.mjs");
 const cache=await openBlitzResultCache();
 
 let proc=null,rl=null,ready=false,booting=null,recovery=null,seq=0,starts=0,restarts=0,recoveryCycles=0,lastBootAt=null,lastRunAt=null,runs=0,kernelPid=null;
+let optimizationPackets=0,optimizationDownshifts=0,optimizationRetriedTasks=0,optimizationRecoveredTasks=0,optimizationCoalescedTasks=0;
 const pending=new Map();
 
 function safeEnv(){
@@ -219,6 +220,12 @@ async function runTasks(tasks,requestedConcurrency,workloadProfile){
     for(const i of retryIndexes)if(results[i]?.ok===true)recoveredTasks++;
   }
 
+  optimizationPackets++;
+  optimizationCoalescedTasks+=coalesced;
+  optimizationRetriedTasks+=retryIndexes.length;
+  optimizationRecoveredTasks+=recoveredTasks;
+  if(retryIndexes.length)optimizationDownshifts++;
+
   await cache.flush();
   return {
     ok:results.every(x=>x?.ok===true),
@@ -255,7 +262,7 @@ function send(res,status,body){res.statusCode=status;res.setHeader("content-type
 const server=http.createServer(async(req,res)=>{
   if(req.url==="/health"){
     if(!ready){try{await ensureKernel()}catch{}}
-    return send(res,200,{ok:ready,runner:"ZEIBAEL_BLITZ_WARM_RUNNER_V2",ready,kernel_pid:kernelPid,starts,restarts,recovery_cycles:recoveryCycles,last_boot_at:lastBootAt,last_run_at:lastRunAt,runs,cache_entries:cache.size(),max_tasks:MAX_TASKS,max_concurrency:MAX_CONCURRENCY,proven_worker_ceiling:PROVEN_WORKER_CEILING,adaptive_concurrency:true,profile_caps:PROFILE_CAPS,canonical_state:"SUPABASE",zero_spend_required:true,live_order_enabled:false});
+    return send(res,200,{ok:ready,runner:"ZEIBAEL_BLITZ_WARM_RUNNER_V2",ready,kernel_pid:kernelPid,starts,restarts,recovery_cycles:recoveryCycles,last_boot_at:lastBootAt,last_run_at:lastRunAt,runs,cache_entries:cache.size(),max_tasks:MAX_TASKS,max_concurrency:MAX_CONCURRENCY,proven_worker_ceiling:PROVEN_WORKER_CEILING,adaptive_concurrency:true,profile_caps:PROFILE_CAPS,optimization_counters:{packets:optimizationPackets,downshift_packets:optimizationDownshifts,retried_tasks:optimizationRetriedTasks,recovered_tasks:optimizationRecoveredTasks,coalesced_tasks:optimizationCoalescedTasks},canonical_state:"SUPABASE",zero_spend_required:true,live_order_enabled:false});
   }
   if(req.url!=="/burst"||req.method!=="POST")return send(res,404,{ok:false,error:"not_found"});
   if(!TOKEN||req.headers.authorization!=="Bearer "+TOKEN)return send(res,401,{ok:false,error:"unauthorized"});
