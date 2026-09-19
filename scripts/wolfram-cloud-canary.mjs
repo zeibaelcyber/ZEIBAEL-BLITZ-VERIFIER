@@ -2,11 +2,11 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-const URL = "https://agenttools.wolfram.com/mcp";
+const ENDPOINT = "https://agenttools.wolfram.com/mcp";
 function must(cond,msg){if(!cond)throw new Error(msg);}
 function dump(x){return JSON.stringify(x);}
 
-const transport = new StreamableHTTPClientTransport(new URL(URL));
+const transport = new StreamableHTTPClientTransport(new globalThis.URL(ENDPOINT));
 const client = new Client(
   {name:"zeibael-wolfram-public-canary",version:"1.0.0"},
   {capabilities:{}}
@@ -39,7 +39,7 @@ try {
   console.log(JSON.stringify({
     schema:"zeibael.wolfram_cloud_mcp_public_canary.v1",
     status:"VERIFIED",
-    endpoint:URL,
+    endpoint:ENDPOINT,
     transport:"MCP_SDK_STREAMABLE_HTTP",
     zero_spend_canary:true,
     secrets_used:false,
