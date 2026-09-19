@@ -12,6 +12,11 @@ const PROVEN_WORKER_CEILING=1791,DEFAULT_MAX_CONCURRENCY=64,HARD_TASK_CEILING=40
 const MAX_CONCURRENCY=Math.max(1,Math.min(PROVEN_WORKER_CEILING,Number(process.env.ZEIBAEL_MAX_CONCURRENCY)||DEFAULT_MAX_CONCURRENCY));
 const MAX_TASKS=Math.max(1,Math.min(HARD_TASK_CEILING,Number(process.env.ZEIBAEL_MAX_TASKS)||DEFAULT_MAX_TASKS));
 const MAX_CODE_BYTES=64*1024,MAX_TOTAL_CODE_BYTES=8*1024*1024,MAX_BODY_BYTES=10*1024*1024;
+const PROFILE_CAPS=Object.freeze({LIGHT:17,IO:23,BUILD_TEST:24,CPU_HEAVY:32});
+function profileCap(value){
+  const p=String(value||'').toUpperCase();
+  return {profile:Object.prototype.hasOwnProperty.call(PROFILE_CAPS,p)?p:'GENERIC',cap:Object.prototype.hasOwnProperty.call(PROFILE_CAPS,p)?PROFILE_CAPS[p]:MAX_CONCURRENCY};
+}
 const here=path.dirname(fileURLToPath(import.meta.url));
 const KERNEL_PATH=path.resolve(here,"../../src/warm-kernel.mjs");
 const cache=await openBlitzResultCache();
@@ -131,10 +136,11 @@ function normalizeTasks(tasks){
     return task;
   });
 }
-async function runTasks(tasks,requestedConcurrency){
+async function runTasks(tasks,requestedConcurrency,workloadProfile){
   const normalized=normalizeTasks(tasks),results=new Array(normalized.length);
   let hits=0,misses=0,writes=0,executed=0,cursor=0;
-  const effective=Math.max(1,Math.min(MAX_CONCURRENCY,Number(requestedConcurrency)||normalized.length,normalized.length));
+  const selected=profileCap(workloadProfile);
+  const effective=Math.max(1,Math.min(MAX_CONCURRENCY,selected.cap,Number(requestedConcurrency)||normalized.length,normalized.length));
   async function worker(){
     for(;;){
       const i=cursor++;if(i>=normalized.length)return;
@@ -155,7 +161,7 @@ async function runTasks(tasks,requestedConcurrency){
   }
   await Promise.all(Array.from({length:effective},worker));
   await cache.flush();
-  return {ok:results.every(x=>x?.ok===true),results,concurrency:effective,executed,cache:{hits,misses,writes,entries:cache.size()}};
+  return {ok:results.every(x=>x?.ok===true),results,concurrency:effective,workload_profile:selected.profile,profile_cap:selected.cap,executed,cache:{hits,misses,writes,entries:cache.size()}};
 }
 async function readJson(req){
   const chunks=[];let size=0;
@@ -170,7 +176,7 @@ function send(res,status,body){res.statusCode=status;res.setHeader("content-type
 const server=http.createServer(async(req,res)=>{
   if(req.url==="/health"){
     if(!ready){try{await ensureKernel()}catch{}}
-    return send(res,200,{ok:ready,runner:"ZEIBAEL_BLITZ_WARM_RUNNER_V2",ready,kernel_pid:kernelPid,starts,restarts,recovery_cycles:recoveryCycles,last_boot_at:lastBootAt,last_run_at:lastRunAt,runs,cache_entries:cache.size(),max_tasks:MAX_TASKS,max_concurrency:MAX_CONCURRENCY,proven_worker_ceiling:PROVEN_WORKER_CEILING,adaptive_concurrency:true,canonical_state:"SUPABASE",zero_spend_required:true,live_order_enabled:false});
+    return send(res,200,{ok:ready,runner:"ZEIBAEL_BLITZ_WARM_RUNNER_V2",ready,kernel_pid:kernelPid,starts,restarts,recovery_cycles:recoveryCycles,last_boot_at:lastBootAt,last_run_at:lastRunAt,runs,cache_entries:cache.size(),max_tasks:MAX_TASKS,max_concurrency:MAX_CONCURRENCY,proven_worker_ceiling:PROVEN_WORKER_CEILING,adaptive_concurrency:true,profile_caps:PROFILE_CAPS,canonical_state:"SUPABASE",zero_spend_required:true,live_order_enabled:false});
   }
   if(req.url!=="/burst"||req.method!=="POST")return send(res,404,{ok:false,error:"not_found"});
   if(!TOKEN||req.headers.authorization!=="Bearer "+TOKEN)return send(res,401,{ok:false,error:"unauthorized"});
@@ -180,7 +186,7 @@ const server=http.createServer(async(req,res)=>{
     const route=body?.route||{};
     if(route.execution_class&&route.execution_class!=="LOCAL_BLITZ")return send(res,200,{ok:true,status:"BROKER_REQUIRED",route,executed:false,live_order_enabled:false});
     if(route.broker_required===true)return send(res,200,{ok:true,status:"BROKER_REQUIRED",route,executed:false,live_order_enabled:false});
-    const started=Date.now(),result=await runTasks(body.tasks,body.concurrency);
+    const started=Date.now(),result=await runTasks(body.tasks,body.concurrency,body.workload_profile);
     lastRunAt=new Date().toISOString();runs++;
     return send(res,result.ok?200:422,{...result,lane:"ZEIBAEL_BLITZ_WARM_RUNNER_V2",elapsed_ms:Date.now()-started,kernel_pid:kernelPid,kernel_starts:starts,kernel_restarts:restarts,canonical_state:"SUPABASE",zero_spend_required:true,live_order_enabled:false});
   }catch(e){return send(res,400,{ok:false,error:String(e?.message||e),canonical_state:"SUPABASE",live_order_enabled:false})}
