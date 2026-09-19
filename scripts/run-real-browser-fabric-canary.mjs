@@ -27,8 +27,9 @@ for (let attempt = 1; attempt <= 3 && runtimeHtmlSource !== "LIVE_EDGE"; attempt
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    const edge = await fetch(LIVE_EDGE_URL, {
-      headers: { accept: "text/html,*/*" },
+    const edge = await fetch(LIVE_EDGE_URL + "&canary=" + Date.now() + "-" + attempt, {
+      headers: { accept: "text/html,*/*", "cache-control": "no-cache" },
+      cache: "no-store",
       signal: controller.signal
     });
     liveEdgeStatus = edge.status;
@@ -182,6 +183,9 @@ async function browserCanary() {
   let stage = "initial";
   try {
     const initial = window.zeibaelProbe();
+    stage = "fs-hydration-benchmark";
+    const fsHydrationBenchmark = await window.zeibaelBenchmarkHydration({ repeats: 3 });
+    if(fsHydrationBenchmark?.ok !== true) throw new Error("FS_HYDRATION_BENCHMARK_FAILED");
     stage = "idb-init";
     const cacheDbReady = await window.zeibaelEnsureCacheDb();
     if(cacheDbReady !== true) throw new Error("CACHE_DB_INIT_FAILED");
@@ -274,6 +278,8 @@ async function browserCanary() {
     initial.profile_caps?.IO === 29 &&
     initial.profile_caps?.BUILD_TEST === 32 &&
     initial.profile_caps?.CPU_HEAVY === 39 &&
+    fsHydrationBenchmark?.ok === true &&
+    Number(fsHydrationBenchmark?.repeats) >= 3 &&
     idb.ok === true &&
     watchStart?.ok === true &&
     writeRun?.ok === true &&
@@ -295,6 +301,7 @@ async function browserCanary() {
     ok,
     stage: "complete",
     probe: initial,
+    fs_hydration_benchmark: fsHydrationBenchmark,
     idb_sanity: idb,
     snapshot: { after_first: afterFirst, after_second: afterSecond, events_after_first: eventsAfterFirst, events_after_second: eventsAfterSecond },
     watch: {
@@ -357,7 +364,7 @@ try {
   let lastState = null;
   while (Date.now() - readyStarted < 45000) {
     const r = await runtimeEvaluateWhenContextReady(cdp, {
-      expression: 'JSON.stringify({ready:typeof window.zeibaelProbe==="function"&&typeof window.zeibaelEnsureCacheDb==="function"&&typeof window.zeibaelWatch==="function"&&typeof window.zeibaelRun==="function"&&typeof window.zeibaelExportDigest==="function"&&typeof window.zeibaelRunEnvelope==="function"&&typeof window.zeibaelResetRuntime==="function",status:document.getElementById("status")?.textContent||null,coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,apis:{cacheDb:typeof window.zeibaelEnsureCacheDb,watch:typeof window.zeibaelWatch,run:typeof window.zeibaelRun,exportDigest:typeof window.zeibaelExportDigest,envelope:typeof window.zeibaelRunEnvelope,reset:typeof window.zeibaelResetRuntime}})',
+      expression: 'JSON.stringify({ready:typeof window.zeibaelProbe==="function"&&typeof window.zeibaelEnsureCacheDb==="function"&&typeof window.zeibaelBenchmarkHydration==="function"&&typeof window.zeibaelWatch==="function"&&typeof window.zeibaelRun==="function"&&typeof window.zeibaelExportDigest==="function"&&typeof window.zeibaelRunEnvelope==="function"&&typeof window.zeibaelResetRuntime==="function",status:document.getElementById("status")?.textContent||null,coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,apis:{cacheDb:typeof window.zeibaelEnsureCacheDb,benchmark:typeof window.zeibaelBenchmarkHydration,watch:typeof window.zeibaelWatch,run:typeof window.zeibaelRun,exportDigest:typeof window.zeibaelExportDigest,envelope:typeof window.zeibaelRunEnvelope,reset:typeof window.zeibaelResetRuntime}})',
       returnByValue: true,
     }, 5000);
     if (typeof r?.result?.value === "string") {
