@@ -224,6 +224,9 @@ async function browserCanary() {
       postPrewarmRow?.worker_mode === "PREWARMED_ONE_SHOT_WORKER" &&
       Number(postPrewarmRow?.elapsed_ms) <= 150;
     if(!runtimePrewarmGate) throw new Error("RUNTIME_PREWARM_LATENCY_REGRESSION:"+JSON.stringify({runtimePrewarm,postPrewarmRow}));
+    stage = "cold-spawn-benchmark";
+    const coldSpawnBenchmark = await window.zeibaelBenchmarkColdSpawn({repeats:3});
+    if(coldSpawnBenchmark?.ok !== true) throw new Error("COLD_SPAWN_BENCHMARK_FAILED:"+JSON.stringify(coldSpawnBenchmark));
     stage = "idb-init";
     const cacheDbReady = await window.zeibaelEnsureCacheDb();
     if(cacheDbReady !== true) throw new Error("CACHE_DB_INIT_FAILED");
@@ -348,6 +351,7 @@ async function browserCanary() {
       selection_gate_ok: kernelFirstSelectionGate,
       selection_tolerance_ratio: 1.10
     },
+    cold_spawn_benchmark: coldSpawnBenchmark,
     runtime_prewarm: {
       ok: runtimePrewarmGate,
       strategy: "KERNEL_FIRST",
