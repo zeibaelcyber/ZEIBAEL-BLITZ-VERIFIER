@@ -131,41 +131,50 @@ function normalizeDeps(job) {
   return unique;
 }
 
-function assertAcyclic(jobs) {
+function graphTopology(jobs) {
   const byId = new Map(jobs.map(j => [j.id, j]));
+  const indegree = new Map(jobs.map(j => [j.id, 0]));
+  const children = new Map(jobs.map(j => [j.id, []]));
   for (const job of jobs) {
     for (const dep of job.depends_on) {
       if (!byId.has(dep)) throw new Error("BLITZ_SMART_MISSING_DEPENDENCY:" + job.id + ":" + dep);
+      indegree.set(job.id, (indegree.get(job.id) || 0) + 1);
+      children.get(dep).push(job.id);
     }
   }
-  const visiting = new Set();
-  const visited = new Set();
-  function visit(id) {
-    if (visiting.has(id)) throw new Error("BLITZ_SMART_DEPENDENCY_CYCLE:" + id);
-    if (visited.has(id)) return;
-    visiting.add(id);
-    for (const dep of byId.get(id).depends_on) visit(dep);
-    visiting.delete(id);
-    visited.add(id);
+  const queue = [];
+  for (const job of jobs) if ((indegree.get(job.id) || 0) === 0) queue.push(job.id);
+  const order = [];
+  for (let cursor = 0; cursor < queue.length; cursor++) {
+    const id = queue[cursor];
+    order.push(id);
+    for (const child of children.get(id) || []) {
+      const next = (indegree.get(child) || 0) - 1;
+      indegree.set(child, next);
+      if (next === 0) queue.push(child);
+    }
   }
-  for (const job of jobs) visit(job.id);
+  if (order.length !== jobs.length) {
+    const cyclic = jobs.find(j => (indegree.get(j.id) || 0) > 0)?.id || "unknown";
+    throw new Error("BLITZ_SMART_DEPENDENCY_CYCLE:" + cyclic);
+  }
+  return { byId, children, order };
+}
+
+function assertAcyclic(jobs) {
+  graphTopology(jobs);
 }
 
 function criticalDepths(jobs) {
-  const children = new Map(jobs.map(j => [j.id, []]));
-  for (const job of jobs) {
-    for (const dep of job.depends_on) children.get(dep).push(job.id);
+  const { children, order } = graphTopology(jobs);
+  const depth = new Map();
+  for (let i = order.length - 1; i >= 0; i--) {
+    const id = order[i];
+    let best = 0;
+    for (const child of children.get(id) || []) best = Math.max(best, 1 + (depth.get(child) || 0));
+    depth.set(id, best);
   }
-  const memo = new Map();
-  function depth(id) {
-    if (memo.has(id)) return memo.get(id);
-    const next = children.get(id) || [];
-    const value = next.length ? 1 + Math.max(...next.map(depth)) : 0;
-    memo.set(id, value);
-    return value;
-  }
-  for (const job of jobs) depth(job.id);
-  return memo;
+  return depth;
 }
 
 
@@ -275,22 +284,25 @@ export function compileSmartPacket(input) {
   });
 
   const canonicalByFingerprint = new Map();
+  const canonicalById = new Map();
   const aliasToCanonical = new Map();
   const canonical = [];
 
   for (const job of original) {
     if (!dedupeEligible(job)) {
       canonical.push(job);
+      canonicalById.set(job.id, job);
       continue;
     }
     const prior = canonicalByFingerprint.get(job.__fingerprint);
     if (!prior) {
       canonicalByFingerprint.set(job.__fingerprint, job.id);
       canonical.push(job);
+      canonicalById.set(job.id, job);
       continue;
     }
     aliasToCanonical.set(job.id, prior);
-    const target = canonical.find(item => item.id === prior);
+    const target = canonicalById.get(prior);
     if (target) {
       target.depends_on = [...new Set([...target.depends_on, ...job.depends_on])];
     }
