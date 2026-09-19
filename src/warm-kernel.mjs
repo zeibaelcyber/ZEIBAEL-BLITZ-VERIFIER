@@ -4,6 +4,7 @@ const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});
 const MAX_OUTPUT=6000;
 const PREWARM_TARGET=Math.max(1,Math.min(8,Number(process.env.ZEIBAEL_KERNEL_PREWARM)||8));
 const PREWARM_READY_TARGET=Math.max(1,Math.min(PREWARM_TARGET,Number(process.env.ZEIBAEL_KERNEL_READY_PREWARM)||2));
+const PREWARM_REPLENISH_PARALLELISM=Math.max(1,Math.min(PREWARM_TARGET,Number(process.env.ZEIBAEL_KERNEL_REPLENISH_PARALLELISM)||2));
 const PREPARE_TIMEOUT_MS=5000;
 const idle=[],preparedWaiters=[];
 let preparing=0,poolSpawned=0,poolUses=0,poolColdFallbacks=0,poolReplenishments=0,poolWaitedForReplenish=0;
@@ -26,12 +27,13 @@ parentPort.postMessage({type:"ready"});
 `;
 const BOOTSTRAP_URL=new URL("data:text/javascript;base64,"+Buffer.from(BOOTSTRAP,"utf8").toString("base64"));
 function trim(s){return String(s||"").slice(-MAX_OUTPUT)}
-function poolState(){return {target:PREWARM_TARGET,ready_target:PREWARM_READY_TARGET,ready:idle.length,preparing,waiters:preparedWaiters.length,spawned:poolSpawned,prewarmed_uses:poolUses,cold_fallbacks:poolColdFallbacks,replenishments:poolReplenishments,waited_for_replenish:poolWaitedForReplenish}}
+function poolState(){return {target:PREWARM_TARGET,ready_target:PREWARM_READY_TARGET,replenish_parallelism:PREWARM_REPLENISH_PARALLELISM,ready:idle.length,preparing,waiters:preparedWaiters.length,spawned:poolSpawned,prewarmed_uses:poolUses,cold_fallbacks:poolColdFallbacks,replenishments:poolReplenishments,waited_for_replenish:poolWaitedForReplenish}}
 function offerPrepared(worker){
   const waiter=preparedWaiters.shift();
-  if(waiter){waiter.resolve(worker);return}
-  if(idle.length<PREWARM_TARGET)idle.push(worker);
+  if(waiter)waiter.resolve(worker);
+  else if(idle.length<PREWARM_TARGET)idle.push(worker);
   else try{void worker.terminate().catch(()=>{})}catch{}
+  queueMicrotask(scheduleReplenish);
 }
 async function waitForPrepared(){
   if(idle.length)return idle.pop();
@@ -69,9 +71,9 @@ function spawnPrepared(){
   }).finally(()=>{preparing--})
 }
 function scheduleReplenish(){
-  while(idle.length+preparing<PREWARM_TARGET){
+  while(idle.length+preparing<PREWARM_TARGET && preparing<PREWARM_REPLENISH_PARALLELISM){
     poolReplenishments++;
-    void spawnPrepared().then(offerPrepared).catch(()=>{});
+    void spawnPrepared().then(offerPrepared).catch(()=>{queueMicrotask(scheduleReplenish)});
   }
 }
 async function initializePool(){
