@@ -1,0 +1,28 @@
+name: ZEIBAEL Migration Shadow Transports Canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/migration-shadow-transports-canary.yml"
+      - "integrations/supabase-migration/shadow_adapters.py"
+      - "integrations/supabase-migration/shadow_transports.py"
+      - "scripts/test_migration_shadow_transports.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-transport-canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      ZEIBAEL_REDIS_SHADOW_ENABLED: "false"
+      ZEIBAEL_HONEYCOMB_SHADOW_ENABLED: "false"
+      ZEIBAEL_CLOUDFLARE_SHADOW_DISPATCH: "false"
+      ZEIBAEL_SUPABASE_MUTATION: "false"
+      ZEIBAEL_LIVE_ORDER_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run local-only transport canary
+        run: python3 scripts/test_migration_shadow_transports.py
