@@ -40,6 +40,12 @@ try{
   ];
   const first=await burst(tasks);
   const second=await burst(tasks.map((t,i)=>({...t,id:i===0?"a2":"b2"})));
+  const coalesceProbe=await burst([
+    {id:"c1",code:"console.log('coalesce-proof-20260919')",kernel_safe:true,cache_safe:true,timeout_ms:1000},
+    {id:"c2",code:"console.log('coalesce-proof-20260919')",kernel_safe:true,cache_safe:true,timeout_ms:1000},
+    {id:"c3",code:"console.log('coalesce-proof-20260919')",kernel_safe:true,cache_safe:true,timeout_ms:1000},
+    {id:"c4",code:"console.log('coalesce-proof-20260919')",kernel_safe:true,cache_safe:true,timeout_ms:1000}
+  ],4,"LIGHT");
   const governorNegative=await burst([
     {id:"g-ok-1",code:"console.log(1)",kernel_safe:true,cache_safe:false,timeout_ms:1000},
     {id:"g-ok-2",code:"console.log(2)",kernel_safe:true,cache_safe:false,timeout_ms:1000},
@@ -61,6 +67,10 @@ try{
     h1.ready===true &&
     first.status===200 && first.body?.ok===true && Number(first.body?.executed)===2 &&
     second.status===200 && second.body?.ok===true && Number(second.body?.executed)===0 && Number(second.body?.cache?.hits)===2 &&
+    coalesceProbe.status===200 && coalesceProbe.body?.ok===true &&
+    Number(coalesceProbe.body?.executed)===1 &&
+    Number(coalesceProbe.body?.attempts)===1 &&
+    Number(coalesceProbe.body?.cache?.coalesced)===3 &&
     governorNegative.status===422 && governorNegative.body?.ok===false &&
     governorNegative.body?.adaptive_governor?.enabled===true &&
     governorNegative.body?.adaptive_governor?.downshifted===true &&
@@ -81,6 +91,7 @@ try{
     pid_reused:h1.kernel_pid===h2.kernel_pid,
     first:first.body,
     second:second.body,
+    in_flight_coalescing:coalesceProbe.body,
     adaptive_governor_negative_control:governorNegative.body,
     broker:broker.body,
     health:h2,
