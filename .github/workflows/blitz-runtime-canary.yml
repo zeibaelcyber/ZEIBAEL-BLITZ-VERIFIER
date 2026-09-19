@@ -23,7 +23,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: blitz-runtime-canary-${{ github.ref }}
+  group: blitz-runtime-canary-v2-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
