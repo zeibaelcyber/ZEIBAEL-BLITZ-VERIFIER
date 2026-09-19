@@ -227,6 +227,9 @@ async function browserCanary() {
     stage = "cold-spawn-benchmark";
     const coldSpawnBenchmark = await window.zeibaelBenchmarkColdSpawn({repeats:3});
     if(coldSpawnBenchmark?.ok !== true) throw new Error("COLD_SPAWN_BENCHMARK_FAILED:"+JSON.stringify(coldSpawnBenchmark));
+    stage = "cold-process-prime-benchmark";
+    const coldProcessPrimeBenchmark = await window.zeibaelBenchmarkColdProcessPrime({repeats:3});
+    if(coldProcessPrimeBenchmark?.ok !== true) throw new Error("COLD_PROCESS_PRIME_BENCHMARK_FAILED:"+JSON.stringify(coldProcessPrimeBenchmark));
     stage = "idb-init";
     const cacheDbReady = await window.zeibaelEnsureCacheDb();
     if(cacheDbReady !== true) throw new Error("CACHE_DB_INIT_FAILED");
@@ -352,6 +355,7 @@ async function browserCanary() {
       selection_tolerance_ratio: 1.10
     },
     cold_spawn_benchmark: coldSpawnBenchmark,
+    cold_process_prime_benchmark: coldProcessPrimeBenchmark,
     runtime_prewarm: {
       ok: runtimePrewarmGate,
       strategy: "KERNEL_FIRST",
