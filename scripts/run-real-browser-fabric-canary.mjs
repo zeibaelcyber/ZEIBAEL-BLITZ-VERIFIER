@@ -184,28 +184,6 @@ async function browserCanary() {
   let stage = "initial";
   try {
     const initial = window.zeibaelProbe();
-    stage = "fs-hydration-benchmark";
-    const fsHydrationBenchmark = await window.zeibaelBenchmarkHydration({ repeats: 3 });
-    if(fsHydrationBenchmark?.ok !== true) throw new Error("FS_HYDRATION_BENCHMARK_FAILED");
-    const hydrationMedians = fsHydrationBenchmark?.medians || {};
-    const coldSeries = Array.isArray(fsHydrationBenchmark?.cold_series) ? fsHydrationBenchmark.cold_series : [];
-    const coldDirectSamples = coldSeries.filter(x => x?.primary_mode === "DIRECT_WRITE").length;
-    const coldSnapshotSamples = coldSeries.filter(x => x?.primary_mode === "SNAPSHOT_MOUNT").length;
-    const hydrationLatencyGate =
-      coldDirectSamples >= 3 &&
-      coldSnapshotSamples >= 3 &&
-      Number(hydrationMedians.cold_direct_first_mutation_ms) <= 900 &&
-      Number(hydrationMedians.cold_snapshot_first_mutation_ms) <= 900 &&
-      Number(hydrationMedians.direct_fresh_ms) <= 10 &&
-      Number(hydrationMedians.snapshot_fresh_ms) <= 10;
-    if(!hydrationLatencyGate) throw new Error("FS_HYDRATION_LATENCY_REGRESSION:"+JSON.stringify(hydrationMedians));
-    stage = "prewarm-order-benchmark";
-    const prewarmOrderBenchmark = await window.zeibaelBenchmarkPrewarmOrder({ repeats: 3 });
-    if(prewarmOrderBenchmark?.ok !== true) throw new Error("PREWARM_ORDER_BENCHMARK_FAILED:"+JSON.stringify(prewarmOrderBenchmark));
-    const prewarmOrderMedians = prewarmOrderBenchmark?.medians || {};
-    const kernelFirstSelectionGate =
-      Number(prewarmOrderMedians.kernel_first_total_ms) <= Number(prewarmOrderMedians.probe_first_total_ms) * 1.10;
-    if(!kernelFirstSelectionGate) throw new Error("KERNEL_FIRST_PREWARM_REGRESSION:"+JSON.stringify(prewarmOrderMedians));
     stage = "runtime-prewarm";
     await window.zeibaelResetRuntime();
     const runtimePrewarm = await window.zeibaelPrewarm();
@@ -224,6 +202,13 @@ async function browserCanary() {
       postPrewarmRow?.worker_mode === "PREWARMED_ONE_SHOT_WORKER" &&
       Number(postPrewarmRow?.elapsed_ms) <= 150;
     if(!runtimePrewarmGate) throw new Error("RUNTIME_PREWARM_LATENCY_REGRESSION:"+JSON.stringify({runtimePrewarm,postPrewarmRow}));
+    const prewarmEvents = window.zeibaelEvents();
+    const selectedHydration = [...prewarmEvents].reverse().find(x => x?.type === "kernel_hydration")?.detail || null;
+    const selectedHydrationGate =
+      selectedHydration !== null &&
+      ["SOURCE_WRITE","SNAPSHOT_BYPASS_SOURCE_WRITE"].includes(String(selectedHydration?.source || "")) &&
+      Number(selectedHydration?.total_ms) <= 900;
+    if(!selectedHydrationGate) throw new Error("SELECTED_HYDRATION_REGRESSION:"+JSON.stringify(selectedHydration));
     stage = "idb-init";
     const cacheDbReady = await window.zeibaelEnsureCacheDb();
     if(cacheDbReady !== true) throw new Error("CACHE_DB_INIT_FAILED");
@@ -237,6 +222,12 @@ async function browserCanary() {
     tasks: [{ id: "fs-write", code: fsCode, cache_safe: false, kernel_safe: false }],
     concurrency: 1,
   });
+  const coldSpawnRow = writeRun?.results?.[0] || null;
+  const coldSpawnRegressionGate =
+    writeRun?.ok === true &&
+    coldSpawnRow?.execution_mode === "COLD_SPAWN" &&
+    Number(coldSpawnRow?.elapsed_ms) <= 1500;
+  if(!coldSpawnRegressionGate) throw new Error("COLD_SPAWN_REGRESSION:"+JSON.stringify(coldSpawnRow));
   let watchEvents = [];
   const watchDeadline = Date.now() + 5000;
   while (Date.now() < watchDeadline) {
@@ -316,10 +307,9 @@ async function browserCanary() {
     initial.profile_caps?.IO === 29 &&
     initial.profile_caps?.BUILD_TEST === 32 &&
     initial.profile_caps?.CPU_HEAVY === 39 &&
-    fsHydrationBenchmark?.ok === true &&
-    Number(fsHydrationBenchmark?.repeats) >= 3 &&
-    hydrationLatencyGate === true &&
+    selectedHydrationGate === true &&
     runtimePrewarmGate === true &&
+    coldSpawnRegressionGate === true &&
     idb.ok === true &&
     watchStart?.ok === true &&
     writeRun?.ok === true &&
@@ -341,12 +331,12 @@ async function browserCanary() {
     ok,
     stage: "complete",
     probe: initial,
-    fs_hydration_benchmark: fsHydrationBenchmark,
-    prewarm_order_benchmark: {
-      ...prewarmOrderBenchmark,
-      selected: "KERNEL_FIRST",
-      selection_gate_ok: kernelFirstSelectionGate,
-      selection_tolerance_ratio: 1.10
+    selected_path_regression: {
+      exploratory_ab_retired_from_per_commit_canary: true,
+      evidence_source: "CANONICAL_SUPABASE_REAL_HOST_SENTINELS",
+      hydration: {selected:"DIRECT_WRITE",probe:selectedHydration,max_ms:900,ok:selectedHydrationGate},
+      prewarm: {selected:"KERNEL_FIRST",no_process_prime:true,inline_kernel:"REJECTED_REAL_HOST_READY_TIMEOUT"},
+      cold_spawn: {max_ms:1500,ok:coldSpawnRegressionGate,row:coldSpawnRow}
     },
     runtime_prewarm: {
       ok: runtimePrewarmGate,
@@ -358,16 +348,11 @@ async function browserCanary() {
     },
     hydration_fast_path: {
       selected: "DIRECT_WRITE",
-      selection_basis: "SINGLE_FILE_LOWER_COMPLEXITY_AFTER_REPEATED_REAL_HOST_EQUIVALENCE",
-      cold_relative_winner: Number(hydrationMedians.cold_direct_first_mutation_ms) <= Number(hydrationMedians.cold_snapshot_first_mutation_ms) ? "DIRECT_WRITE" : "SNAPSHOT_MOUNT",
-      cold_relative_order_is_gate: false,
-      latency_gate_ok: hydrationLatencyGate,
-      cold_direct_samples: coldDirectSamples,
-      cold_snapshot_samples: coldSnapshotSamples,
-      medians: hydrationMedians,
-      max_cold_first_mutation_ms: 900,
-      max_warm_materialization_ms: 10,
-      cold_relative_order_policy: "OBSERVE_NOT_BLOCK"
+      selection_basis: "CANONICAL_REPEATED_REAL_HOST_AB__SELECTED_PATH_REGRESSION_ONLY",
+      selected_probe: selectedHydration,
+      latency_gate_ok: selectedHydrationGate,
+      max_selected_hydration_ms: 900,
+      exploratory_relative_order_policy: "RETIRED_FROM_PER_COMMIT_CANARY"
     },
     idb_sanity: idb,
     snapshot: { after_first: afterFirst, after_second: afterSecond, events_after_first: eventsAfterFirst, events_after_second: eventsAfterSecond },
