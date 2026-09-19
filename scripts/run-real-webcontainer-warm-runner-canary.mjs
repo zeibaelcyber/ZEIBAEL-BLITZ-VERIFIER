@@ -260,7 +260,7 @@ try {
   const started = Date.now();
   let evidence = null;
   let lastState = null;
-  while (Date.now() - started < 150000) {
+  while (Date.now() - started < 75000) {
     const r = await cdp.send("Runtime.evaluate", {
       expression: `JSON.stringify({
         href:location.href,
