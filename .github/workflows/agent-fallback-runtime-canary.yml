@@ -21,7 +21,7 @@ concurrency:
 jobs:
   openclaw:
     name: OpenClaw fresh zero-spend runtime
-    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/openclaw-full-runtime-proof-v1'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
