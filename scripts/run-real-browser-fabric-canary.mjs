@@ -12,8 +12,33 @@ const LIVE_EDGE_URL = "https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zei
 const PRIVATE_SOURCE_COMMIT = "32b91a7850194a25f81dad3fdf3b51ad8b111d81";
 const PRIVATE_SOURCE_BLOB = "94009267e975b20db74a899741fa3e50f2945759";
 
-const html = await readFile(FIXTURE, "utf8");
-const fixtureSha256 = createHash("sha256").update(html, "utf8").digest("hex");
+const fixtureHtml = await readFile(FIXTURE, "utf8");
+const fixtureSha256 = createHash("sha256").update(fixtureHtml, "utf8").digest("hex");
+let html = fixtureHtml;
+let liveEdgeStatus = 0;
+let liveEdgeSha256 = "";
+let liveEdgeFixtureExactMatch = false;
+let runtimeHtmlSource = "FIXTURE_FALLBACK";
+try {
+  const edge = await fetch(LIVE_EDGE_URL, { headers: { accept: "text/html,*/*" } });
+  liveEdgeStatus = edge.status;
+  const edgeBody = await edge.text();
+  liveEdgeSha256 = createHash("sha256").update(edgeBody, "utf8").digest("hex");
+  liveEdgeFixtureExactMatch = edgeBody === fixtureHtml;
+  if (edge.ok && edgeBody.includes("window.zeibaelRun") && edgeBody.includes("WebContainer")) {
+    html = edgeBody;
+    runtimeHtmlSource = "LIVE_EDGE";
+  }
+} catch {}
+
+const moduleMatch = html.match(/<script type="module">([\\s\\S]*?)<\\/script>/i);
+if (!moduleMatch) throw new Error("BROWSER_FABRIC_MODULE_SCRIPT_MISSING");
+const syntaxPath = "/tmp/zeibael-browser-fabric-" + process.pid + ".mjs";
+await writeFile(syntaxPath, moduleMatch[1], "utf8");
+const syntax = spawnSync(process.execPath, ["--check", syntaxPath], { encoding: "utf8" });
+if (syntax.status !== 0) {
+  throw new Error("BROWSER_FABRIC_SYNTAX_INVALID:" + String(syntax.stderr || syntax.stdout || "unknown").slice(-4000));
+}
 
 const server = http.createServer((req, res) => {
   res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
@@ -243,16 +268,6 @@ async function browserCanary() {
 }
 
 await mkdir("evidence", { recursive: true });
-let liveEdgeStatus = 0;
-let liveEdgeSha256 = "";
-let liveEdgeFixtureExactMatch = false;
-try {
-  const edge = await fetch(LIVE_EDGE_URL, { headers: { accept: "text/html,*/*" } });
-  liveEdgeStatus = edge.status;
-  const edgeBody = await edge.text();
-  liveEdgeSha256 = createHash("sha256").update(edgeBody, "utf8").digest("hex");
-  liveEdgeFixtureExactMatch = edgeBody === html;
-} catch {}
 
 await new Promise((resolve, reject) => {
   server.once("error", reject);
@@ -325,6 +340,7 @@ try {
     private_source_commit: PRIVATE_SOURCE_COMMIT,
     private_source_blob: PRIVATE_SOURCE_BLOB,
     fixture_sha256: fixtureSha256,
+    runtime_html_source: runtimeHtmlSource,
     live_edge_http_status: liveEdgeStatus,
     live_edge_html_sha256: liveEdgeSha256,
     live_edge_fixture_exact_match: liveEdgeFixtureExactMatch,
