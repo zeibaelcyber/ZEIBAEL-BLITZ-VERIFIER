@@ -41,6 +41,15 @@ addEventListener("unhandledrejection",e=>window.__zeibaelPageErrors.push({type:"
 const status = document.getElementById("status");
 const result = document.getElementById("result");
 const tree = ${JSON.stringify(tree)};
+async function stepTimeout(p, ms, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      p,
+      new Promise((_, reject) => timer = setTimeout(() => reject(new Error(label)), ms))
+    ]);
+  } finally { clearTimeout(timer); }
+}
 async function collect(proc) {
   let out = "";
   const reader = proc.output.getReader();
@@ -75,38 +84,50 @@ async function main() {
     }
     if (!WebContainer) throw new Error("WEBCONTAINER_API_IMPORT_FAILED:" + String(importError || "unknown"));
     status.textContent = "WEBCONTAINER_BOOT";
-    wc = await WebContainer.boot({ coep: "credentialless" });
+    wc = await stepTimeout(WebContainer.boot({ coep: "credentialless" }), 15000, "WEBCONTAINER_BOOT_TIMEOUT_15S");
     status.textContent = "MOUNTING";
-    await wc.mount(tree);
+    await stepTimeout(wc.mount(tree), 10000, "WEBCONTAINER_MOUNT_TIMEOUT_10S");
 
-    const nodeProc = await wc.spawn("node", ["-e", "console.log(JSON.stringify({version:process.version,platform:process.platform,arch:process.arch}))"]);
+    const nodeProc = await stepTimeout(
+      wc.spawn("node", ["-e", "console.log(JSON.stringify({version:process.version,platform:process.platform,arch:process.arch}))"]),
+      8000,
+      "NODE_PROBE_SPAWN_TIMEOUT_8S"
+    );
     const nodeOut = await collect(nodeProc);
     const nodeExit = await nodeProc.exit;
     if (nodeExit !== 0) throw new Error("NODE_PROBE_FAILED");
     const node = JSON.parse(nodeOut.trim());
 
     status.textContent = "WARM_RUNNER_SERVER";
-    const runner = await wc.spawn(
-      "node",
-      ["services/warm-runner/server.mjs"],
-      {
-        env: {
-          PORT: "19091",
-          ZEIBAEL_BURST_TOKEN: "selftest-token",
-          NODE_ENV: "production",
-          ZEIBAEL_LIVE_ORDER_ENABLED: "false"
-        },
-        output: false
-      }
+    const runner = await stepTimeout(
+      wc.spawn(
+        "node",
+        ["services/warm-runner/server.mjs"],
+        {
+          env: {
+            PORT: "19091",
+            ZEIBAEL_BURST_TOKEN: "selftest-token",
+            NODE_ENV: "production",
+            ZEIBAEL_LIVE_ORDER_ENABLED: "false"
+          },
+          output: false
+        }
+      ),
+      8000,
+      "WARM_RUNNER_SERVER_SPAWN_TIMEOUT_8S"
     );
     let warm;
     let probeExit = 1;
     try {
       status.textContent = "WARM_RUNNER_PROBE";
-      const proc = await wc.spawn(
-        "node",
-        ["services/warm-runner/canary-probe.mjs"],
-        { env: { PORT: "19091", ZEIBAEL_BURST_TOKEN: "selftest-token" } }
+      const proc = await stepTimeout(
+        wc.spawn(
+          "node",
+          ["services/warm-runner/canary-probe.mjs"],
+          { env: { PORT: "19091", ZEIBAEL_BURST_TOKEN: "selftest-token" } }
+        ),
+        8000,
+        "WARM_RUNNER_PROBE_SPAWN_TIMEOUT_8S"
       );
       const probeResult = await Promise.race([
         (async()=>({ output: await collect(proc), exit: await proc.exit }))(),
