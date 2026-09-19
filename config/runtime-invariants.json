@@ -1,0 +1,21 @@
+{
+  "schema": "zeibael.blitz.runtime-invariants.v1",
+  "global_runtime": {
+    "max_concurrency": 64,
+    "first_fail": 65,
+    "max_tasks": 4096
+  },
+  "workload_profile_caps": {
+    "LIGHT": 18,
+    "IO": 29,
+    "BUILD_TEST": 32,
+    "CPU_HEAVY": 39
+  },
+  "required": {
+    "zero_spend": true,
+    "live_order_enabled": false,
+    "browser_fabric_runtime_verified": true,
+    "warm_runner_runtime_verified": true,
+    "oidc_sentinel_required": true
+  }
+}
