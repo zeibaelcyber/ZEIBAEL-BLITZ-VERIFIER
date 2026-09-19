@@ -153,8 +153,22 @@ async function hydrateKernelFiles(c,root){
     catch(e){pushRuntimeEvent('snapshot_parse_failed',{key,message:String(e?.message||e)})}
   }
   if(snapTree){
-    try{const mountPoint=(root.startsWith('/')?root.slice(1):root);await c.mount(snapTree,{mountPoint});snapshotHits++;pushRuntimeEvent('snapshot_hit',{key});return {source:'SNAPSHOT'}}
-    catch(e){pushRuntimeEvent('snapshot_mount_failed',{message:String(e?.message||e)})}
+    try{
+      const mountPoint=(root.startsWith('/')?root.slice(1):root);
+      await c.mount(snapTree,{mountPoint});
+      let repaired=false;
+      try{
+        const restored=await c.fs.readFile(root+'/kernel.mjs','utf8');
+        if(String(restored||'').trim().length<32)throw new Error('snapshot_kernel_empty')
+      }catch(e){
+        await c.fs.mkdir(root,{recursive:true});
+        await c.fs.writeFile(root+'/kernel.mjs',WARM_KERNEL_SOURCE);
+        repaired=true;
+        pushRuntimeEvent('snapshot_repaired',{key,message:String(e?.message||e)})
+      }
+      snapshotHits++;pushRuntimeEvent('snapshot_hit',{key,repaired});
+      return {source:repaired?'SNAPSHOT_REPAIRED':'SNAPSHOT'}
+    }catch(e){pushRuntimeEvent('snapshot_mount_failed',{message:String(e?.message||e)})}
   }
   snapshotMisses++;
   await c.fs.mkdir(root,{recursive:true});
@@ -312,7 +326,18 @@ window.zeibaelWatch=async({path='/zeibael-fabric',recursive=true}={})=>{
   const c=await boot();if(fabricWatcher){try{fabricWatcher.close()}catch{}}
   try{await c.fs.mkdir(path,{recursive:true})}catch{}
   fabricWatcher=c.fs.watch(path,{recursive:recursive!==false},(event,filename)=>pushRuntimeEvent('fs_change',{path,event,filename:String(filename||'')}));
-  pushRuntimeEvent('watch_started',{path,recursive:recursive!==false});return {ok:true,path,recursive:recursive!==false}
+  pushRuntimeEvent('watch_started',{path,recursive:recursive!==false});
+  let self_probe=false;
+  try{
+    const base=String(path||'/').replace(/\/$/,'')||'/';
+    const probe=(base==='/'?'':base)+'/.zeibael-watch-probe-'+Date.now();
+    await c.fs.writeFile(probe,'1');
+    await new Promise(r=>setTimeout(r,75));
+    try{await c.fs.rm(probe,{force:true})}catch{}
+    self_probe=true;
+    pushRuntimeEvent('watch_self_probe',{path,probe})
+  }catch(e){pushRuntimeEvent('watch_self_probe_failed',{path,message:String(e?.message||e)})}
+  return {ok:true,path,recursive:recursive!==false,self_probe}
 };
 window.zeibaelStopWatch=()=>{if(fabricWatcher){try{fabricWatcher.close()}catch{}fabricWatcher=null;pushRuntimeEvent('watch_stopped',{})}return {ok:true}};
 window.zeibaelExportDigest=async({path='/',format='json'}={})=>{
