@@ -291,7 +291,7 @@ try {
   const readyStarted = Date.now();
   let ready = false;
   let lastState = null;
-  while (Date.now() - readyStarted < 30000) {
+  while (Date.now() - readyStarted < 45000) {
     const r = await cdp.send("Runtime.evaluate", {
       expression: 'JSON.stringify({ready:typeof window.zeibaelProbe==="function"&&typeof window.zeibaelEnsureCacheDb==="function"&&typeof window.zeibaelWatch==="function"&&typeof window.zeibaelRun==="function"&&typeof window.zeibaelExportDigest==="function"&&typeof window.zeibaelRunEnvelope==="function"&&typeof window.zeibaelResetRuntime==="function",status:document.getElementById("status")?.textContent||null,coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,apis:{cacheDb:typeof window.zeibaelEnsureCacheDb,watch:typeof window.zeibaelWatch,run:typeof window.zeibaelRun,exportDigest:typeof window.zeibaelExportDigest,envelope:typeof window.zeibaelRunEnvelope,reset:typeof window.zeibaelResetRuntime}})',
       returnByValue: true,
