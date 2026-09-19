@@ -179,66 +179,162 @@ function deps(job) {
   return Array.isArray(job.depends_on) ? job.depends_on : [];
 }
 
-function depsSatisfied(job) {
-  return deps(job).every(id => state.get(id)?.status === 'PASS');
+const dependents = new Map(jobs.map(job => [job.id, []]));
+const remainingDeps = new Map();
+for (const job of jobs) {
+  const d = deps(job);
+  remainingDeps.set(job.id, d.length);
+  for (const dep of d) {
+    if (dependents.has(dep)) dependents.get(dep).push(job.id);
+  }
 }
 
-function depsTerminal(job) {
-  return deps(job).every(id => {
-    const s = state.get(id)?.status;
-    return s === 'PASS' || s === 'FAILED' || s === 'BLOCKED';
-  });
-}
-
-const pending = new Set(jobs.map(j => j.id));
 const running = new Map();
 const runningByProfile = new Map(Object.keys(WORKLOAD_CAPS).map(k => [k, 0]));
-const readyOrder = jobs.map(j => j.id).sort((a, b) => (executionRank.get(a) ?? 999999) - (executionRank.get(b) ?? 999999));
+const readyHeaps = new Map(Object.keys(WORKLOAD_CAPS).map(k => [k, []]));
+const queued = new Set();
 
-while (pending.size || running.size) {
-  let launched = 0;
-
-  for (const id of readyOrder) {
-    if (!pending.has(id)) continue;
-    if (running.size >= maxConcurrency) break;
-    const job = byId.get(id);
-    const profile = workloadProfile(job);
+function rankOf(id) {
+  return executionRank.get(id) ?? 999999;
+}
+function heapLess(a, b) {
+  return a.rank < b.rank || (a.rank === b.rank && a.id < b.id);
+}
+function heapPush(heap, item) {
+  heap.push(item);
+  let i = heap.length - 1;
+  while (i > 0) {
+    const p = (i - 1) >> 1;
+    if (!heapLess(heap[i], heap[p])) break;
+    [heap[i], heap[p]] = [heap[p], heap[i]];
+    i = p;
+  }
+}
+function heapPop(heap) {
+  if (!heap.length) return null;
+  const top = heap[0];
+  const last = heap.pop();
+  if (heap.length) {
+    heap[0] = last;
+    let i = 0;
+    for (;;) {
+      const l = i * 2 + 1, r = l + 1;
+      let best = i;
+      if (l < heap.length && heapLess(heap[l], heap[best])) best = l;
+      if (r < heap.length && heapLess(heap[r], heap[best])) best = r;
+      if (best === i) break;
+      [heap[i], heap[best]] = [heap[best], heap[i]];
+      i = best;
+    }
+  }
+  return top;
+}
+function enqueueReady(id) {
+  if (queued.has(id) || state.has(id) || running.has(id)) return;
+  const job = byId.get(id);
+  if (!job) return;
+  const profile = workloadProfile(job);
+  heapPush(readyHeaps.get(profile), { id, rank: rankOf(id) });
+  queued.add(id);
+}
+function peekReady(profile) {
+  const heap = readyHeaps.get(profile);
+  while (heap.length) {
+    const top = heap[0];
+    if (queued.has(top.id) && !state.has(top.id) && !running.has(top.id)) return top;
+    heapPop(heap);
+  }
+  return null;
+}
+function takeNextReady() {
+  let selectedProfile = null;
+  let selected = null;
+  for (const profile of Object.keys(WORKLOAD_CAPS)) {
     if ((runningByProfile.get(profile) || 0) >= workloadCap(profile)) continue;
-    if (depsSatisfied(job)) {
-      pending.delete(id);
-      launched++;
-      runningByProfile.set(profile, (runningByProfile.get(profile) || 0) + 1);
-      const p = execute(job).then(result => {
+    const top = peekReady(profile);
+    if (!top) continue;
+    if (!selected || heapLess(top, selected)) {
+      selected = top;
+      selectedProfile = profile;
+    }
+  }
+  if (!selectedProfile) return null;
+  const item = heapPop(readyHeaps.get(selectedProfile));
+  queued.delete(item.id);
+  return { id: item.id, profile: selectedProfile };
+}
+function releaseDependents(id) {
+  for (const child of dependents.get(id) || []) {
+    if (state.has(child) || running.has(child)) continue;
+    const next = Math.max(0, (remainingDeps.get(child) || 0) - 1);
+    remainingDeps.set(child, next);
+    if (next === 0) enqueueReady(child);
+  }
+}
+function blockDependents(id) {
+  const stack = [...(dependents.get(id) || [])];
+  while (stack.length) {
+    const child = stack.pop();
+    if (state.has(child) || running.has(child)) continue;
+    queued.delete(child);
+    const job = byId.get(child);
+    state.set(child, {
+      id: child,
+      type: job?.type,
+      status: 'BLOCKED',
+      duration_ms: 0,
+      blocker: 'dependency_failed',
+      cache_hit: false
+    });
+    for (const grandchild of dependents.get(child) || []) stack.push(grandchild);
+  }
+}
+
+for (const job of jobs) {
+  if ((remainingDeps.get(job.id) || 0) === 0) enqueueReady(job.id);
+}
+
+while (state.size < jobs.length) {
+  let launched = 0;
+  while (running.size < maxConcurrency) {
+    const next = takeNextReady();
+    if (!next) break;
+    const { id, profile } = next;
+    const job = byId.get(id);
+    launched++;
+    runningByProfile.set(profile, (runningByProfile.get(profile) || 0) + 1);
+
+    const p = execute(job)
+      .catch(error => ({
+        id,
+        type: job.type,
+        status: 'FAILED',
+        duration_ms: 0,
+        error: String(error?.stack || error),
+        cache_hit: false
+      }))
+      .then(result => {
         state.set(id, result);
         running.delete(id);
         runningByProfile.set(profile, Math.max(0, (runningByProfile.get(profile) || 1) - 1));
+        if (result?.status === 'PASS') releaseDependents(id);
+        else blockDependents(id);
         return result;
-      }, error => {
-        running.delete(id);
-        runningByProfile.set(profile, Math.max(0, (runningByProfile.get(profile) || 1) - 1));
-        throw error;
       });
-      running.set(id, p);
-    } else if (depsTerminal(job)) {
-      pending.delete(id);
-      state.set(id, {
-        id,
-        type: job.type,
-        status: 'BLOCKED',
-        duration_ms: 0,
-        blocker: 'dependency_failed',
-        cache_hit: false
-      });
-    }
+    running.set(id, p);
   }
 
   if (running.size) {
     await Promise.race(running.values());
-  } else if (!launched && pending.size) {
-    for (const id of pending) {
-      const job = byId.get(id);
-      state.set(id, {
-        id,
+    continue;
+  }
+
+  if (!launched && state.size < jobs.length) {
+    for (const job of jobs) {
+      if (state.has(job.id)) continue;
+      queued.delete(job.id);
+      state.set(job.id, {
+        id: job.id,
         type: job.type,
         status: 'BLOCKED',
         duration_ms: 0,
@@ -246,7 +342,6 @@ while (pending.size || running.size) {
         cache_hit: false
       });
     }
-    pending.clear();
   }
 }
 
