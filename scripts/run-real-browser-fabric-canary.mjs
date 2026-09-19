@@ -9,8 +9,8 @@ const API_VERSION = "1.6.4";
 const FIXTURE = "fixtures/browser-fabric-v19.html";
 const EVIDENCE = "evidence/browser-fabric-real-host.json";
 const LIVE_EDGE_URL = "https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-stackblitz-direct?lane=stackblitz-compute-v1";
-const PRIVATE_SOURCE_COMMIT = "e1e7ea15dd1ba0e4eb532cc6f5d6a6970427138b";
-const PRIVATE_SOURCE_BLOB = "39f947451d82e67c0ff41854d063175bc0ebc7b7";
+const PRIVATE_SOURCE_COMMIT = "32b91a7850194a25f81dad3fdf3b51ad8b111d81";
+const PRIVATE_SOURCE_BLOB = "94009267e975b20db74a899741fa3e50f2945759";
 
 const html = await readFile(FIXTURE, "utf8");
 const fixtureSha256 = createHash("sha256").update(html, "utf8").digest("hex");
@@ -89,15 +89,15 @@ async function browserCanary() {
   try {
     const initial = window.zeibaelProbe();
     stage = "watch";
-    const watchStart = await window.zeibaelWatch({ path: "/", recursive: true });
+    const watchStart = await window.zeibaelWatch({ path: "/zeibael-watch", recursive: true });
 
   stage = "cold-run";
-  const fsCode = 'console.log("watch-trigger")';
+  const fsCode = 'import fs from "node:fs/promises"; await fs.writeFile("/zeibael-watch/canary.txt","v1"); console.log("watch-trigger")';
   const writeRun = await window.zeibaelRun({
     tasks: [{ id: "fs-write", code: fsCode, cache_safe: false, kernel_safe: false }],
     concurrency: 1,
   });
-  await wait(500);
+  await wait(1500);
   const watchEvents = window.zeibaelEvents().filter(x => x && x.type === "fs_change");
   stage = "export-digest";
   const exportDigest = await window.zeibaelExportDigest({ path: "/", format: "json" });
