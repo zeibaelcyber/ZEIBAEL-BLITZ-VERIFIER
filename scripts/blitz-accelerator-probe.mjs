@@ -71,6 +71,17 @@ async function drain(proc){
 })().catch(e=>{window.__result={candidate:${CANDIDATE},ok:false,timeout:false,error:String(e?.stack||e)};window.__done=true;});
 </script>`;
 
+
+async function persistEvidence(result){
+  const endpoint='https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-blitz-worker-evidence';
+  const runId=process.env.GITHUB_RUN_ID||String(Date.now());
+  const benchmark_id='blitz-accelerator-capacity-'+runId;
+  try{
+    const r=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({benchmark_id,event:'attempt',worker_n:CANDIDATE,payload:{...result,github_run_id:runId,github_sha:process.env.GITHUB_SHA||null}})});
+    return {ok:r.ok,status:r.status,benchmark_id};
+  }catch(e){return {ok:false,error:String(e?.message||e),benchmark_id}}
+}
+
 const server=http.createServer((req,res)=>{
   res.setHeader('content-type','text/html; charset=utf-8');
   res.setHeader('cache-control','no-store');
@@ -91,7 +102,8 @@ try{
 }catch(e){
   result={candidate:CANDIDATE,ok:false,timeout:false,host_error:String(e?.message||e)};
 }
-console.log('ZEIBAEL_ACCELERATOR_PROBE_RESULT='+JSON.stringify(result));
+const persisted=await persistEvidence(result);
+console.log('ZEIBAEL_ACCELERATOR_PROBE_RESULT='+JSON.stringify({...result,persisted}));
 await page.close().catch(()=>{});
 await browser.close();
 server.close();
