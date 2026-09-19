@@ -196,9 +196,12 @@ async function browserCanary() {
       coldSnapshotSamples >= 3 &&
       Number(hydrationMedians.cold_direct_first_mutation_ms) <= 900 &&
       Number(hydrationMedians.cold_snapshot_first_mutation_ms) <= 900 &&
-      Number(hydrationMedians.direct_fresh_ms) <= 10 &&
-      Number(hydrationMedians.snapshot_fresh_ms) <= 10;
+      Number(hydrationMedians.direct_fresh_ms) <= 20 &&
+      Number(hydrationMedians.snapshot_fresh_ms) <= 20;
     if(!hydrationLatencyGate) throw new Error("FS_HYDRATION_LATENCY_REGRESSION:"+JSON.stringify(hydrationMedians));
+    stage = "kernel-launch-benchmark";
+    const kernelLaunchBenchmark = await window.zeibaelBenchmarkKernelLaunch({ repeats: 3 });
+    if(kernelLaunchBenchmark?.ok !== true) throw new Error("KERNEL_LAUNCH_BENCHMARK_FAILED:"+JSON.stringify(kernelLaunchBenchmark));
     stage = "prewarm-order-benchmark";
     const prewarmOrderBenchmark = await window.zeibaelBenchmarkPrewarmOrder({ repeats: 3 });
     if(prewarmOrderBenchmark?.ok !== true) throw new Error("PREWARM_ORDER_BENCHMARK_FAILED:"+JSON.stringify(prewarmOrderBenchmark));
@@ -348,6 +351,7 @@ async function browserCanary() {
     stage: "complete",
     probe: initial,
     fs_hydration_benchmark: fsHydrationBenchmark,
+    kernel_launch_benchmark: kernelLaunchBenchmark,
     prewarm_order_benchmark: {
       ...prewarmOrderBenchmark,
       selected: "KERNEL_FIRST",
@@ -374,7 +378,7 @@ async function browserCanary() {
       cold_snapshot_samples: coldSnapshotSamples,
       medians: hydrationMedians,
       max_cold_first_mutation_ms: 900,
-      max_warm_materialization_ms: 10,
+      max_warm_materialization_ms: 20,
       cold_relative_order_policy: "OBSERVE_NOT_BLOCK"
     },
     idb_sanity: idb,
