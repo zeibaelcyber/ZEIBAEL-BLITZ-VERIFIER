@@ -12,7 +12,9 @@ export async function openBlitzResultCache(options = {}) {
   const configuredMax = Number(options.maxEntries || process.env.ZEIBAEL_BLITZ_CACHE_MAX_ENTRIES || DEFAULT_MAX_ENTRIES);
   const maxEntries = Math.max(16, Math.min(65536, Number.isFinite(configuredMax) ? Math.floor(configuredMax) : DEFAULT_MAX_ENTRIES));
   const entries = new Map();
-  let dirty = false;
+  let generation = 0;
+  let persistedGeneration = 0;
+  let flushPromise = null;
 
   await mkdir(dir, { recursive: true });
   try {
@@ -32,12 +34,22 @@ export async function openBlitzResultCache(options = {}) {
 
   function prune() {
     const now = nowMs();
+    let changed = false;
     for (const [key, item] of entries) {
-      if (!Number.isFinite(item.expires_at) || item.expires_at <= now) entries.delete(key);
+      if (!Number.isFinite(item.expires_at) || item.expires_at <= now) {
+        entries.delete(key);
+        changed = true;
+      }
     }
-    if (entries.size <= maxEntries) return;
-    const ordered = [...entries.values()].sort((a, b) => Number(a.stored_at || 0) - Number(b.stored_at || 0));
-    for (const item of ordered.slice(0, entries.size - maxEntries)) entries.delete(item.key);
+    if (entries.size > maxEntries) {
+      const ordered = [...entries.values()].sort((a, b) => Number(a.stored_at || 0) - Number(b.stored_at || 0));
+      for (const item of ordered.slice(0, entries.size - maxEntries)) {
+        entries.delete(item.key);
+        changed = true;
+      }
+    }
+    if (changed) generation++;
+    return changed;
   }
 
   return {
@@ -47,7 +59,7 @@ export async function openBlitzResultCache(options = {}) {
       if (!item) return null;
       if (!Number.isFinite(item.expires_at) || item.expires_at <= nowMs()) {
         entries.delete(key);
-        dirty = true;
+        generation++;
         return null;
       }
       return item;
@@ -61,20 +73,31 @@ export async function openBlitzResultCache(options = {}) {
         expires_at: storedAt + ttl,
         result
       });
-      dirty = true;
+      generation++;
       prune();
     },
     async flush() {
       prune();
-      if (!dirty) return;
+      if (persistedGeneration >= generation) return;
+      if (flushPromise) {
+        await flushPromise;
+        if (persistedGeneration < generation) return this.flush();
+        return;
+      }
+      const targetGeneration = generation;
       const payload = {
         schema: 'zeibael.blitz.cache.v1',
         written_at: new Date().toISOString(),
+        generation: targetGeneration,
         entries: [...entries.values()]
       };
-      await writeFile(temp, JSON.stringify(payload), 'utf8');
-      await rename(temp, file);
-      dirty = false;
+      flushPromise = (async () => {
+        await writeFile(temp, JSON.stringify(payload), 'utf8');
+        await rename(temp, file);
+        persistedGeneration = Math.max(persistedGeneration, targetGeneration);
+      })().finally(() => { flushPromise = null; });
+      await flushPromise;
+      if (persistedGeneration < generation) return this.flush();
     },
     size() { return entries.size; }
   };
