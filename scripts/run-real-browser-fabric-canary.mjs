@@ -199,6 +199,9 @@ async function browserCanary() {
       Number(hydrationMedians.direct_fresh_ms) <= 10 &&
       Number(hydrationMedians.snapshot_fresh_ms) <= 10;
     if(!hydrationLatencyGate) throw new Error("FS_HYDRATION_LATENCY_REGRESSION:"+JSON.stringify(hydrationMedians));
+    stage = "prewarm-order-benchmark";
+    const prewarmOrderBenchmark = await window.zeibaelBenchmarkPrewarmOrder({ repeats: 3 });
+    if(prewarmOrderBenchmark?.ok !== true) throw new Error("PREWARM_ORDER_BENCHMARK_FAILED:"+JSON.stringify(prewarmOrderBenchmark));
     stage = "runtime-prewarm";
     await window.zeibaelResetRuntime();
     const runtimePrewarm = await window.zeibaelPrewarm();
@@ -332,6 +335,7 @@ async function browserCanary() {
     stage: "complete",
     probe: initial,
     fs_hydration_benchmark: fsHydrationBenchmark,
+    prewarm_order_benchmark: prewarmOrderBenchmark,
     runtime_prewarm: {
       ok: runtimePrewarmGate,
       prewarm: runtimePrewarm,
