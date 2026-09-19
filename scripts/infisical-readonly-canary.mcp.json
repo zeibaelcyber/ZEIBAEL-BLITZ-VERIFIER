@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "infisical": {
+      "command": "node",
+      "args": [
+        "/tmp/infisical-mcp/dist/index.js"
+      ],
+      "env": {
+        "INFISICAL_AUTH_METHOD": "access-token",
+        "INFISICAL_TOKEN": "ZEIBAEL_DUMMY_TOKEN_DO_NOT_USE",
+        "INFISICAL_ENABLED_TOOLS": "list-projects,list-secrets,get-secret",
+        "INFISICAL_MASK_SECRET_VALUES": "true",
+        "INFISICAL_HOST_URL": "https://app.infisical.com"
+      }
+    }
+  }
+}

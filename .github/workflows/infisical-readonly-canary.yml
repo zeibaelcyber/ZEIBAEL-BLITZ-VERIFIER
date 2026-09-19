@@ -1,0 +1,33 @@
+name: ZEIBAEL Infisical Readonly MCP Canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/infisical-readonly-canary.yml"
+      - "scripts/infisical-readonly-canary.mcp.json"
+      - "scripts/infisical-readonly-canary.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Build pinned Infisical MCP source
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/Infisical/infisical-mcp-server.git /tmp/infisical-mcp
+          git -C /tmp/infisical-mcp checkout --quiet --detach 6d30bc1eb9968dd74df82c8af0a3222b543d3875
+          test "$(git -C /tmp/infisical-mcp rev-parse HEAD)" = "6d30bc1eb9968dd74df82c8af0a3222b543d3875"
+          cd /tmp/infisical-mcp
+          npm ci --ignore-scripts
+          npm run build
+      - name: Run no-account read-only Infisical canary
+        run: node scripts/infisical-readonly-canary.mjs
