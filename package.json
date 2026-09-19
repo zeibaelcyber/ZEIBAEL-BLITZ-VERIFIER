@@ -28,6 +28,6 @@
   },
   "stackblitz": {
     "installDependencies": false,
-    "startCommand": "npm run smart:one-shot"
+    "startCommand": "npm run fabric:selftest"
   }
 }
