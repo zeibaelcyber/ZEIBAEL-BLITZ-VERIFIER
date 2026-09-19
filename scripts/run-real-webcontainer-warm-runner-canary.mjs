@@ -32,8 +32,12 @@ const html = `<!doctype html>
 <title>ZEIBAEL Warm Runner Real WebContainer Canary</title>
 <pre id="status">BOOTING</pre>
 <pre id="result"></pre>
+<script>
+window.__zeibaelPageErrors=[];
+addEventListener("error",e=>window.__zeibaelPageErrors.push({type:"error",message:String(e.message||e.error||"unknown"),filename:e.filename||null,lineno:e.lineno||null}));
+addEventListener("unhandledrejection",e=>window.__zeibaelPageErrors.push({type:"unhandledrejection",message:String(e.reason?.stack||e.reason||"unknown")}));
+</script>
 <script type="module">
-import { WebContainer } from "https://esm.sh/@webcontainer/api@${API_VERSION}";
 const status = document.getElementById("status");
 const result = document.getElementById("result");
 const tree = ${JSON.stringify(tree)};
@@ -54,6 +58,8 @@ async function main() {
     if (!self.crossOriginIsolated || typeof SharedArrayBuffer !== "function") {
       throw new Error("CROSS_ORIGIN_ISOLATION_REQUIRED");
     }
+    status.textContent = "IMPORTING_WEBCONTAINER_API";
+    const { WebContainer } = await import("https://esm.sh/@webcontainer/api@${API_VERSION}");
     status.textContent = "WEBCONTAINER_BOOT";
     wc = await WebContainer.boot({ coep: "credentialless" });
     status.textContent = "MOUNTING";
@@ -185,6 +191,7 @@ const chrome = spawn(chromePath(), [
   "--no-sandbox",
   "--disable-gpu",
   "--disable-dev-shm-usage",
+  "--disable-features=TrackingProtection3pcd,ThirdPartyStoragePartitioning,ThirdPartyCookiesDeprecation,BlockThirdPartyCookies",
   "--remote-debugging-address=127.0.0.1",
   "--remote-debugging-port=" + DEBUG_PORT,
   "--user-data-dir=/tmp/zeibael-chrome-" + process.pid,
@@ -210,19 +217,40 @@ try {
 
   const started = Date.now();
   let evidence = null;
+  let lastState = null;
   while (Date.now() - started < 150000) {
     const r = await cdp.send("Runtime.evaluate", {
-      expression: "document.getElementById('result')?.textContent || ''",
+      expression: `JSON.stringify({
+        href:location.href,
+        readyState:document.readyState,
+        title:document.title,
+        contentType:document.contentType,
+        status:document.getElementById("status")?.textContent||null,
+        result:document.getElementById("result")?.textContent||"",
+        coi:self.crossOriginIsolated,
+        sab:typeof SharedArrayBuffer,
+        cookieEnabled:navigator.cookieEnabled,
+        serviceWorker:("serviceWorker" in navigator),
+        errors:window.__zeibaelPageErrors||[]
+      })`,
       returnByValue: true,
     });
-    const value = r?.result?.value;
+    const rawState = r?.result?.value;
+    if (typeof rawState === "string") {
+      try { lastState = JSON.parse(rawState); } catch {}
+    }
+    const value = lastState?.result;
     if (typeof value === "string" && value.startsWith("{")) {
       evidence = JSON.parse(value);
       if (evidence.ok === true || evidence.error) break;
     }
     await sleep(500);
   }
-  if (!evidence) throw new Error("CANARY_RESULT_TIMEOUT");
+  if (!evidence) {
+    const err = new Error("CANARY_RESULT_TIMEOUT");
+    err.diagnostic = lastState;
+    throw err;
+  }
   await writeFile(evidencePath, JSON.stringify(evidence, null, 2) + "\n", "utf8");
   process.stdout.write("ZEIBAEL_REAL_WEBCONTAINER_CANARY=" + JSON.stringify(evidence) + "\n");
   if (evidence.ok !== true) process.exitCode = 1;
@@ -233,6 +261,7 @@ try {
     runtime: "STACKBLITZ_WEBCONTAINER",
     webcontainer_api_version: API_VERSION,
     error: String(error?.stack || error),
+    diagnostic: error?.diagnostic || null,
     chrome_stderr: chromeErr.slice(-6000),
     canonical_state: "SUPABASE",
     live_order_enabled: false,
