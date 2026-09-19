@@ -23,7 +23,8 @@
     "smart:proof": "node src/acker-accelerator.mjs examples/openclaw-hermes-one-shot.packet.json",
     "fabric:selftest": "node scripts/blitz-free-fabric-selftest.mjs",
     "warm-kernel:selftest": "node scripts/warm-kernel-selftest.mjs",
-    "warm-runner:selftest": "node services/warm-runner/selftest.mjs"
+    "warm-runner:selftest": "node services/warm-runner/selftest.mjs",
+    "health-cache:selftest": "node scripts/system-health-cache-selftest.mjs"
   },
   "engines": {
     "node": ">=18"
