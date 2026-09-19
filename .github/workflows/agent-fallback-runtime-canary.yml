@@ -46,12 +46,145 @@ jobs:
           printf '%s\n' "$help_out" | head -80
           printf '%s' "$help_out" | grep -Ei 'gateway|config|doctor|sandbox' >/dev/null
 
+      - name: Configure locked zero-spend OpenClaw sandbox
+        shell: bash
+        env:
+          OPENCLAW_CONFIG_PATH: ${{ runner.temp }}/openclaw/openclaw.json
+          OPENCLAW_STATE_DIR: ${{ runner.temp }}/openclaw/state
+          OPENCLAW_GATEWAY_TOKEN: zeibael-public-canary-token
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$OPENCLAW_CONFIG_PATH")" "$OPENCLAW_STATE_DIR"
+          cat >"$OPENCLAW_CONFIG_PATH" <<'JSON'
+          {
+            "gateway": {
+              "mode": "local",
+              "port": 18789,
+              "bind": "loopback",
+              "auth": {
+                "mode": "token",
+                "token": "zeibael-public-canary-token"
+              }
+            },
+            "browser": { "enabled": false },
+            "agents": {
+              "defaults": {
+                "heartbeat": { "every": "0m" },
+                "sandbox": {
+                  "mode": "all",
+                  "scope": "agent",
+                  "backend": "docker",
+                  "workspaceAccess": "none",
+                  "docker": {
+                    "image": "openclaw-sandbox:bookworm-slim",
+                    "readOnlyRoot": true,
+                    "tmpfs": ["/tmp", "/var/tmp", "/run"],
+                    "network": "none",
+                    "capDrop": ["ALL"]
+                  }
+                }
+              }
+            },
+            "tools": {
+              "profile": "minimal",
+              "deny": [
+                "exec", "process", "write", "edit", "apply_patch",
+                "secrets", "cron", "automations",
+                "sessions_send", "sessions_spawn", "subagents"
+              ],
+              "sandbox": {
+                "tools": {
+                  "deny": [
+                    "exec", "process", "write", "edit", "apply_patch",
+                    "sessions_send", "sessions_spawn", "subagents"
+                  ]
+                }
+              },
+              "elevated": { "enabled": false }
+            }
+          }
+          JSON
+
+          npx --yes --package=openclaw@2026.6.35 -- openclaw config validate --json | tee "$RUNNER_TEMP/openclaw-config-validate.json"
+          grep -E '"ok"[[:space:]]*:[[:space:]]*true' "$RUNNER_TEMP/openclaw-config-validate.json" >/dev/null
+
+          test "$(npx --yes --package=openclaw@2026.6.35 -- openclaw config get agents.defaults.sandbox.mode --json | tr -d '[:space:]')" = '"all"'
+          test "$(npx --yes --package=openclaw@2026.6.35 -- openclaw config get agents.defaults.sandbox.backend --json | tr -d '[:space:]')" = '"docker"'
+          test "$(npx --yes --package=openclaw@2026.6.35 -- openclaw config get agents.defaults.sandbox.workspaceAccess --json | tr -d '[:space:]')" = '"none"'
+          test "$(npx --yes --package=openclaw@2026.6.35 -- openclaw config get agents.defaults.heartbeat.every --json | tr -d '[:space:]')" = '"0m"'
+          test "$(npx --yes --package=openclaw@2026.6.35 -- openclaw config get tools.elevated.enabled --json | tr -d '[:space:]')" = 'false'
+
+          deny_json="$(npx --yes --package=openclaw@2026.6.35 -- openclaw config get tools.deny --json)"
+          for tool in exec process write edit apply_patch secrets cron automations sessions_send sessions_spawn subagents; do
+            printf '%s' "$deny_json" | grep -F ""$tool"" >/dev/null
+          done
+
+      - name: Build and inspect Docker sandbox image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version >/dev/null
+          docker build -t openclaw-sandbox:bookworm-slim - <<'DOCKERFILE'
+          FROM debian:bookworm-slim
+          ENV DEBIAN_FRONTEND=noninteractive
+          RUN useradd --create-home --shell /bin/bash sandbox
+          USER sandbox
+          WORKDIR /home/sandbox
+          CMD ["sleep", "infinity"]
+          DOCKERFILE
+          docker image inspect openclaw-sandbox:bookworm-slim >/dev/null
+
+      - name: Prove effective sandbox policy and live gateway
+        shell: bash
+        env:
+          OPENCLAW_CONFIG_PATH: ${{ runner.temp }}/openclaw/openclaw.json
+          OPENCLAW_STATE_DIR: ${{ runner.temp }}/openclaw/state
+          OPENCLAW_GATEWAY_TOKEN: zeibael-public-canary-token
+        run: |
+          set -euo pipefail
+
+          explain="$(npx --yes --package=openclaw@2026.6.35 -- openclaw sandbox explain --agent main --json)"
+          printf '%s\n' "$explain" | tee "$RUNNER_TEMP/openclaw-sandbox-explain.json"
+          printf '%s' "$explain" | grep -Ei '"mode"[[:space:]]*:[[:space:]]*"all"|sandbox.*all' >/dev/null
+          printf '%s' "$explain" | grep -Ei '"backend"[[:space:]]*:[[:space:]]*"docker"|docker' >/dev/null
+          printf '%s' "$explain" | grep -Ei '"workspaceAccess"[[:space:]]*:[[:space:]]*"none"|workspace.*none' >/dev/null
+
+          npx --yes --package=openclaw@2026.6.35 -- openclaw gateway run --port 18789 >"$RUNNER_TEMP/openclaw-gateway.log" 2>&1 &
+          echo $! >"$RUNNER_TEMP/openclaw-gateway.pid"
+
+          ready=0
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:18789/healthz >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = "1"
+
+          curl -fsS http://127.0.0.1:18789/healthz | tee "$RUNNER_TEMP/openclaw-healthz.txt"
+          curl -fsS -H 'Authorization: Bearer zeibael-public-canary-token' http://127.0.0.1:18789/readyz | tee "$RUNNER_TEMP/openclaw-readyz.txt"
+
+          gateway_health="$(npx --yes --package=openclaw@2026.6.35 -- openclaw gateway health --port 18789 --token zeibael-public-canary-token --json)"
+          printf '%s\n' "$gateway_health" | tee "$RUNNER_TEMP/openclaw-gateway-health.json"
+
           python - <<'PY'
           import json
           print("ZEIBAEL_OPENCLAW_CANARY=" + json.dumps({
               "status": "PASS",
               "version": "2026.6.35",
               "runtime": "GITHUB_ACTIONS_PUBLIC_ZERO_SPEND",
+              "gateway_live": True,
+              "gateway_port": 18789,
+              "healthz_pass": True,
+              "readyz_pass": True,
+              "sandbox_mode": "all",
+              "sandbox_backend": "docker",
+              "workspace_access": "none",
+              "heartbeat_every": "0m",
+              "elevated_enabled": False,
+              "mutation_scheduler_tools_denied": True,
+              "docker_image_verified": True,
               "provider_call": False,
               "secrets_required": False,
               "live_order_enabled": False,
@@ -59,6 +192,15 @@ jobs:
               "canonical_memory_owner_changed": False
           }, separators=(",", ":")))
           PY
+
+      - name: Stop OpenClaw gateway
+        if: always()
+        shell: bash
+        run: |
+          if test -f "$RUNNER_TEMP/openclaw-gateway.pid"; then
+            kill "$(cat "$RUNNER_TEMP/openclaw-gateway.pid")" 2>/dev/null || true
+          fi
+          tail -120 "$RUNNER_TEMP/openclaw-gateway.log" 2>/dev/null || true
 
   hermes:
     name: Hermes fresh local-stub agent runtime
