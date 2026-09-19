@@ -8,12 +8,13 @@ import { openBlitzResultCache } from "../../src/blitz-cache.mjs";
 
 const PORT=Number(process.env.PORT||10080);
 const TOKEN=process.env.ZEIBAEL_BURST_TOKEN||"";
-const MAX_CONCURRENCY=57,MAX_TASKS=512,DEFAULT_TTL=10*60*1000;
+const PROVEN_WORKER_CEILING=1791,DEFAULT_MAX_CONCURRENCY=57,MAX_TASKS=512,DEFAULT_TTL=10*60*1000;
+const MAX_CONCURRENCY=Math.max(1,Math.min(PROVEN_WORKER_CEILING,Number(process.env.ZEIBAEL_MAX_CONCURRENCY)||DEFAULT_MAX_CONCURRENCY));
 const here=path.dirname(fileURLToPath(import.meta.url));
 const KERNEL_PATH=path.resolve(here,"../../src/warm-kernel.mjs");
 const cache=await openBlitzResultCache();
 
-let proc=null,rl=null,ready=false,booting=null,seq=0,starts=0,restarts=0,lastBootAt=null,lastRunAt=null,runs=0,kernelPid=null;
+let proc=null,rl=null,ready=false,booting=null,recovery=null,seq=0,starts=0,restarts=0,recoveryCycles=0,lastBootAt=null,lastRunAt=null,runs=0,kernelPid=null;
 const pending=new Map();
 
 function safeEnv(){
@@ -71,10 +72,26 @@ async function callRaw(payload,timeout=10000){
   proc.stdin.write(JSON.stringify({...payload,request_id})+"\n");
   return await promise;
 }
+async function recoverKernel(reason){
+  if(recovery)return recovery;
+  recovery=(async()=>{
+    recoveryCycles++;
+    restarts++;
+    reset(reason);
+    await ensureKernel();
+  })().finally(()=>{recovery=null});
+  return recovery;
+}
 async function callTask(task){
   await ensureKernel();
   try{return await callRaw({id:task.id,code:task.code,timeout_ms:task.timeout_ms},task.timeout_ms)}
-  catch(first){restarts++;reset("task_failed");await ensureKernel();return await callRaw({id:task.id,code:task.code,timeout_ms:task.timeout_ms},task.timeout_ms)}
+  catch(first){
+    await recoverKernel("transport_failed");
+    try{return await callRaw({id:task.id,code:task.code,timeout_ms:task.timeout_ms},task.timeout_ms)}
+    catch(second){
+      return {id:task.id,ok:false,exit_code:1,elapsed_ms:0,output:"",error:"KERNEL_TRANSPORT_FAILED:"+String(second?.message||second)};
+    }
+  }
 }
 function cacheKey(task){
   if(task.cache_safe!==true)return null;
@@ -120,7 +137,10 @@ async function runTasks(tasks,requestedConcurrency){
         if(hit?.result?.ok===true){hits++;results[i]={...hit.result,id:task.id,cache_hit:true,elapsed_ms:0};continue}
         misses++;
       }
-      const row=await callTask(task);executed++;
+      let row;
+      try{row=await callTask(task)}
+      catch(e){row={id:task.id,ok:false,exit_code:1,elapsed_ms:0,output:"",error:"TASK_TRANSPORT_ERROR:"+String(e?.message||e)}}
+      executed++;
       const result={id:task.id,ok:row.ok===true,exit_code:row.exit_code,elapsed_ms:row.elapsed_ms,output:String(row.output||"").slice(-6000),error:row.error||null,cache_hit:false,execution_mode:"PERSISTENT_WARM_KERNEL"};
       results[i]=result;
       if(key&&result.ok){cache.set(key,result,DEFAULT_TTL);writes++}
@@ -138,7 +158,7 @@ function send(res,status,body){res.statusCode=status;res.setHeader("content-type
 const server=http.createServer(async(req,res)=>{
   if(req.url==="/health"){
     if(!ready){try{await ensureKernel()}catch{}}
-    return send(res,200,{ok:ready,runner:"ZEIBAEL_BLITZ_WARM_RUNNER_V2",ready,kernel_pid:kernelPid,starts,restarts,last_boot_at:lastBootAt,last_run_at:lastRunAt,runs,cache_entries:cache.size(),max_concurrency:MAX_CONCURRENCY,canonical_state:"SUPABASE",zero_spend_required:true,live_order_enabled:false});
+    return send(res,200,{ok:ready,runner:"ZEIBAEL_BLITZ_WARM_RUNNER_V2",ready,kernel_pid:kernelPid,starts,restarts,recovery_cycles:recoveryCycles,last_boot_at:lastBootAt,last_run_at:lastRunAt,runs,cache_entries:cache.size(),max_concurrency:MAX_CONCURRENCY,proven_worker_ceiling:PROVEN_WORKER_CEILING,adaptive_concurrency:true,canonical_state:"SUPABASE",zero_spend_required:true,live_order_enabled:false});
   }
   if(req.url!=="/burst"||req.method!=="POST")return send(res,404,{ok:false,error:"not_found"});
   if(!TOKEN||req.headers.authorization!=="Bearer "+TOKEN)return send(res,401,{ok:false,error:"unauthorized"});
