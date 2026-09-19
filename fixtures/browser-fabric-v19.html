@@ -535,7 +535,7 @@ async function cacheL2Autotest(){
 }
 async function autotest(){
   const p=new URLSearchParams(location.search);if(p.get('autotest')!=='convex-max')return;
-  const ladder=[4,8,16,24,32,48,57],probe=window.zeibaelProbe(),runs=[];let stable=0;
+  const ladder=[4,8,16,24,32,48,64],probe=window.zeibaelProbe(),runs=[];let stable=0;
   try{
     for(const requested of ladder){
       status.textContent='BLITZ_'+requested;
@@ -545,13 +545,13 @@ async function autotest(){
       const failed=run.results.filter(x=>!x.ok).length;
       const step={concurrency:run.concurrency,requested_concurrency:requested,ok:run.ok&&failed===0,failed,elapsed_ms:Math.round(performance.now()-t0),tasks:tasks.length};
       runs.push(step);
-      resultEl.textContent=JSON.stringify({probe,runs,stable_max:stable,requested_max:57,live_order_enabled:false,baseline_lock:'BO-ABSORPTION-1H-P1000-v1.0'},null,2);
+      resultEl.textContent=JSON.stringify({probe,runs,stable_max:stable,requested_max:64,live_order_enabled:false,baseline_lock:'BO-ABSORPTION-1H-P1000-v1.0'},null,2);
       if(!step.ok)break;
       stable=run.concurrency;
       await new Promise(r=>setTimeout(r,300))
     }
-    status.textContent=stable===57?'BLITZ_MAX_57_PASS':'BLITZ_STABLE_'+stable;
-    resultEl.textContent=JSON.stringify({probe,runs,stable_max:stable,requested_max:57,cache:window.zeibaelProbe().l1_cache_entries,live_order_enabled:false,baseline_lock:'BO-ABSORPTION-1H-P1000-v1.0'},null,2)
+    status.textContent=stable===64?'BLITZ_MAX_64_PASS':'BLITZ_STABLE_'+stable;
+    resultEl.textContent=JSON.stringify({probe,runs,stable_max:stable,requested_max:64,cache:window.zeibaelProbe().l1_cache_entries,live_order_enabled:false,baseline_lock:'BO-ABSORPTION-1H-P1000-v1.0'},null,2)
   }catch(e){status.textContent='AUTOTEST_ERROR';resultEl.textContent=String(e?.stack||e)}
 }
 (async()=>{
