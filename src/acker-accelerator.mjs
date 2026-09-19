@@ -28,7 +28,7 @@ const DEFAULT_CACHE_TTL_MS = 10 * 60 * 1000;
 const WORKLOAD_CAPS = Object.freeze({
   LIGHT: 17,
   IO: 23,
-  BUILD_TEST: 24,
+  BUILD_TEST: 25,
   CPU_HEAVY: 32
 });
 function workloadProfile(job) {
