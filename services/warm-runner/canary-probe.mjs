@@ -83,6 +83,9 @@ try{
     Number(coalesceProbe.body?.executed)===1 &&
     Number(coalesceProbe.body?.attempts)===1 &&
     Number(coalesceProbe.body?.cache?.coalesced)===3 &&
+    first.body?.results?.every(x=>x.worker_mode==="PREWARMED_ONE_SHOT_WORKER") &&
+    h1.prewarmed_one_shot_workers===true &&
+    Number(h1.prewarm_pool?.target)>=1 &&
     slotProbe.status===200 && slotProbe.body?.ok===true &&
     Number(slotProbe.body?.executed)===3 &&
     Number(slotProbe.body?.cache?.coalesced)===1 &&
@@ -109,6 +112,11 @@ try{
     first:first.body,
     second:second.body,
     in_flight_coalescing:coalesceProbe.body,
+    prewarmed_one_shot_workers:{
+      ok:first.body?.results?.every(x=>x.worker_mode==="PREWARMED_ONE_SHOT_WORKER")===true,
+      first_task_elapsed_ms:first.body?.results?.map(x=>x.elapsed_ms)||[],
+      pool:h2.prewarm_pool||h1.prewarm_pool||null
+    },
     slot_preserving_coalescing:{
       ok:slotUniqueBeforeLeader,
       duplicate_leader_timestamp_ms:slotDupTs,

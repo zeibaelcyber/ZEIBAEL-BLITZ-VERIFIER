@@ -21,7 +21,7 @@ const here=path.dirname(fileURLToPath(import.meta.url));
 const KERNEL_PATH=path.resolve(here,"../../src/warm-kernel.mjs");
 const cache=await openBlitzResultCache();
 
-let proc=null,rl=null,ready=false,booting=null,recovery=null,seq=0,starts=0,restarts=0,recoveryCycles=0,lastBootAt=null,lastRunAt=null,runs=0,kernelPid=null;
+let proc=null,rl=null,ready=false,booting=null,recovery=null,seq=0,starts=0,restarts=0,recoveryCycles=0,lastBootAt=null,lastRunAt=null,runs=0,kernelPid=null,kernelPrewarm=null;
 let optimizationPackets=0,optimizationDownshifts=0,optimizationRetriedTasks=0,optimizationRecoveredTasks=0,optimizationCoalescedTasks=0;
 const pending=new Map();
 
@@ -35,7 +35,7 @@ function failPending(error){
   pending.clear();
 }
 function reset(reason){
-  ready=false;kernelPid=null;
+  ready=false;kernelPid=null;kernelPrewarm=null;
   if(proc){try{proc.kill("SIGKILL")}catch{}}
   proc=null;rl=null;booting=null;
   failPending(new Error("KERNEL_RESET:"+reason));
@@ -67,6 +67,7 @@ async function ensureKernel(){
     await Promise.race([readyP,new Promise((_,reject)=>setTimeout(()=>reject(new Error("KERNEL_READY_TIMEOUT")),5000))]);
     const pong=await callRaw({command:"ping"},3000);
     kernelPid=pong.pid||null;
+    kernelPrewarm=pong.prewarm||null;
   })().catch(e=>{reset("boot_failed");throw e}).finally(()=>{booting=null});
   return booting;
 }
@@ -92,12 +93,17 @@ async function recoverKernel(reason){
 }
 async function callTask(task){
   await ensureKernel();
-  try{return await callRaw({id:task.id,code:task.code,timeout_ms:task.timeout_ms},task.timeout_ms)}
+  async function run(){
+    const row=await callRaw({id:task.id,code:task.code,timeout_ms:task.timeout_ms},task.timeout_ms);
+    if(row?.prewarm)kernelPrewarm=row.prewarm;
+    return row;
+  }
+  try{return await run()}
   catch(first){
     await recoverKernel("transport_failed");
-    try{return await callRaw({id:task.id,code:task.code,timeout_ms:task.timeout_ms},task.timeout_ms)}
+    try{return await run()}
     catch(second){
-      return {id:task.id,ok:false,exit_code:1,elapsed_ms:0,output:"",error:"KERNEL_TRANSPORT_FAILED:"+String(second?.message||second)};
+      return {id:task.id,ok:false,exit_code:1,elapsed_ms:0,output:"",error:"KERNEL_TRANSPORT_FAILED:"+String(second?.message||second),worker_mode:"TRANSPORT_FAILED"};
     }
   }
 }
@@ -185,7 +191,8 @@ async function runTasks(tasks,requestedConcurrency,workloadProfile){
         error:row.error||null,
         cache_hit:false,
         coalesced:false,
-        execution_mode:mode==="INITIAL"?"PERSISTENT_WARM_KERNEL":"PERSISTENT_WARM_KERNEL_ADAPTIVE_RETRY"
+        execution_mode:mode==="INITIAL"?"PERSISTENT_WARM_KERNEL":"PERSISTENT_WARM_KERNEL_ADAPTIVE_RETRY",
+        worker_mode:row.worker_mode||null
       };
     })();
 
@@ -270,7 +277,7 @@ function send(res,status,body){res.statusCode=status;res.setHeader("content-type
 const server=http.createServer(async(req,res)=>{
   if(req.url==="/health"){
     if(!ready){try{await ensureKernel()}catch{}}
-    return send(res,200,{ok:ready,runner:"ZEIBAEL_BLITZ_WARM_RUNNER_V2",ready,kernel_pid:kernelPid,starts,restarts,recovery_cycles:recoveryCycles,last_boot_at:lastBootAt,last_run_at:lastRunAt,runs,cache_entries:cache.size(),max_tasks:MAX_TASKS,max_concurrency:MAX_CONCURRENCY,proven_worker_ceiling:PROVEN_WORKER_CEILING,adaptive_concurrency:true,slot_preserving_coalescing:true,profile_caps:PROFILE_CAPS,optimization_counters:{packets:optimizationPackets,downshift_packets:optimizationDownshifts,retried_tasks:optimizationRetriedTasks,recovered_tasks:optimizationRecoveredTasks,coalesced_tasks:optimizationCoalescedTasks},canonical_state:"SUPABASE",zero_spend_required:true,live_order_enabled:false});
+    return send(res,200,{ok:ready,runner:"ZEIBAEL_BLITZ_WARM_RUNNER_V2",ready,kernel_pid:kernelPid,starts,restarts,recovery_cycles:recoveryCycles,last_boot_at:lastBootAt,last_run_at:lastRunAt,runs,cache_entries:cache.size(),max_tasks:MAX_TASKS,max_concurrency:MAX_CONCURRENCY,proven_worker_ceiling:PROVEN_WORKER_CEILING,adaptive_concurrency:true,slot_preserving_coalescing:true,prewarmed_one_shot_workers:true,prewarm_pool:kernelPrewarm,profile_caps:PROFILE_CAPS,optimization_counters:{packets:optimizationPackets,downshift_packets:optimizationDownshifts,retried_tasks:optimizationRetriedTasks,recovered_tasks:optimizationRecoveredTasks,coalesced_tasks:optimizationCoalescedTasks},canonical_state:"SUPABASE",zero_spend_required:true,live_order_enabled:false});
   }
   if(req.url!=="/burst"||req.method!=="POST")return send(res,404,{ok:false,error:"not_found"});
   if(!TOKEN||req.headers.authorization!=="Bearer "+TOKEN)return send(res,401,{ok:false,error:"unauthorized"});
