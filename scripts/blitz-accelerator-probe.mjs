@@ -114,7 +114,17 @@ const server=http.createServer(async(req,res)=>{
 });
 await new Promise(r=>server.listen(PORT,'127.0.0.1',r));
 
-const browser=await puppeteer.launch({headless:true,args:['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage']});
+const browser=await puppeteer.launch({
+  headless:true,
+  args:[
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--site-per-process',
+    '--isolate-origins=http://127.0.0.1:'+PORT,
+    '--enable-features=SharedArrayBuffer,SiteIsolationForCrossOriginOpenerPolicy'
+  ]
+});
 const page=await browser.newPage();
 let result;
 try{
