@@ -1,0 +1,95 @@
+name: ZEIBAEL M3 Readonly Archive Canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/m3-readonly-archive-canary.yml"
+      - "integrations/supabase-shadow-migration/source-manifest.sql"
+      - "integrations/supabase-shadow-migration/shadow-export-completed.sql"
+      - "scripts/validate_shadow_archive.py"
+      - "scripts/export_shadow_archive_readonly.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  archive-canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start local PostgreSQL 17
+        run: |
+          docker run -d --rm --name zeibael-pg-canary \
+            -e POSTGRES_PASSWORD=postgres \
+            -p 55432:5432 postgres:17-alpine
+          for i in $(seq 1 30); do
+            docker exec zeibael-pg-canary pg_isready -U postgres >/dev/null 2>&1 && break
+            sleep 1
+          done
+      - name: Ensure psql client
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql-client
+          fi
+          psql --version
+      - name: Seed dummy completed archive rows
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 55432 -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          create table public.zeibael_acker_runs(
+            id uuid primary key,status text,created_at timestamptz,completed_at timestamptz,
+            final_result jsonb,evidence_bundle jsonb,qc_summary jsonb
+          );
+          create table public.zeibael_tasks(
+            id uuid primary key,status text,created_at timestamptz,completed_at timestamptz,
+            capability_key text,selected_provider text,payload jsonb,result jsonb
+          );
+          create table public.zeibael_acker_run_workers(
+            id uuid primary key,run_id uuid,task_id uuid,status text,agent_key text,
+            provider_key text,model_key text,result jsonb
+          );
+          insert into public.zeibael_acker_runs values(
+            '00000000-0000-0000-0000-000000000001','SUCCEEDED',now(),now(),
+            '{"ok":true,"n":1}','{"proof":"dummy"}','{"qc":"pass"}'
+          );
+          insert into public.zeibael_tasks values(
+            '00000000-0000-0000-0000-000000000002','SUCCEEDED',now(),now(),
+            'research','dummy','{"input":"dummy"}','{"output":"dummy"}'
+          );
+          insert into public.zeibael_acker_run_workers values(
+            '00000000-0000-0000-0000-000000000003',
+            '00000000-0000-0000-0000-000000000001',
+            '00000000-0000-0000-0000-000000000002',
+            'SUCCEEDED','worker','dummy','dummy-model','{"ok":true}'
+          );
+          SQL
+      - name: Run read-only archive and prove source unchanged
+        env:
+          ZEIBAEL_ARCHIVE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55432/postgres
+          ZEIBAEL_ARCHIVE_OUTPUT_DIR: /tmp/zeibael-archive-pass
+          PGPASSWORD: postgres
+        run: |
+          before="$(psql -XAt "$ZEIBAEL_ARCHIVE_DATABASE_URL" -c "select (select count(*) from zeibael_acker_runs)||':'||(select count(*) from zeibael_tasks)||':'||(select count(*) from zeibael_acker_run_workers)")"
+          bash scripts/export_shadow_archive_readonly.sh
+          after="$(psql -XAt "$ZEIBAEL_ARCHIVE_DATABASE_URL" -c "select (select count(*) from zeibael_acker_runs)||':'||(select count(*) from zeibael_tasks)||':'||(select count(*) from zeibael_acker_run_workers)")"
+          test "$before" = "$after"
+          test -s /tmp/zeibael-archive-pass/source-manifest.json
+          test -s /tmp/zeibael-archive-pass/completed-payloads.ndjson
+      - name: Prove active-work gate fails closed
+        env:
+          ZEIBAEL_ARCHIVE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55432/postgres
+          ZEIBAEL_ARCHIVE_OUTPUT_DIR: /tmp/zeibael-archive-blocked
+          PGPASSWORD: postgres
+        run: |
+          psql -XAt "$ZEIBAEL_ARCHIVE_DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "insert into zeibael_tasks values('00000000-0000-0000-0000-000000000004','RUNNING',now(),null,'research','dummy','{}','{}')"
+          set +e
+          out="$(bash scripts/export_shadow_archive_readonly.sh 2>&1)"
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          grep -F "archive blocked: active run/task/worker exists" <<<"$out"
