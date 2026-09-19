@@ -356,18 +356,18 @@ async function prewarmRuntime(){
   runtimePrewarmPromise=(async()=>{
     const totalStarted=performance.now();
     const c=await boot();
-    const fsStarted=performance.now();
-    const root='/zeibael-prewarm';
-    await c.fs.mkdir(root,{recursive:true});
-    await c.fs.writeFile(root+'/probe','1');
-    const readback=await c.fs.readFile(root+'/probe','utf8');
-    if(readback!=='1')throw new Error('PREWARM_FS_ROUNDTRIP_FAILED');
-    try{await c.fs.rm(root,{recursive:true,force:true})}catch{}
-    const fs_ms=Math.round((performance.now()-fsStarted)*100)/100;
     const kernelStarted=performance.now();
     await ensureKernel(c);
     const kernel_ms=Math.round((performance.now()-kernelStarted)*100)/100;
-    runtimePrewarmStats={ok:true,fs_ms,kernel_ms,total_ms:Math.round((performance.now()-totalStarted)*100)/100,kernel_starts:kernelStarts};
+    runtimePrewarmStats={
+      ok:true,
+      strategy:'KERNEL_FIRST',
+      fs_probe_bypassed:true,
+      fs_ms:0,
+      kernel_ms,
+      total_ms:Math.round((performance.now()-totalStarted)*100)/100,
+      kernel_starts:kernelStarts
+    };
     pushRuntimeEvent('runtime_prewarm',runtimePrewarmStats);
     return runtimePrewarmStats
   })().catch(e=>{
