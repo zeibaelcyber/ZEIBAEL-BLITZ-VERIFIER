@@ -97,7 +97,7 @@ function normalizeTasks(tasks){
       code:typeof t?.code==="string"?t.code:"",
       timeout_ms:Math.max(500,Math.min(30000,Number(t?.timeout_ms)||10000)),
       cache_safe:t?.cache_safe===true,
-      kernel_safe:t?.kernel_safe===true||t?.cache_safe===true,
+      kernel_safe:t?.kernel_safe===true,
       side_effect_class:String(t?.side_effect_class||"NONE").toUpperCase()
     };
     if(!task.code)throw new Error("code_required:"+task.id);
