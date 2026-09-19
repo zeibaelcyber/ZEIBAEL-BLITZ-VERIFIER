@@ -32,27 +32,32 @@
   "policy": "PROFILE_AWARE_ADAPTIVE_CONCURRENCY",
   "resolved_runtime_caps": {
     "LIGHT": {
-      "cap": 17,
+      "cap": 18,
       "status": "EXACT",
-      "first_fail": 18,
-      "benchmark_id": "blitz-capability-profile-light-1789805224969-jafuvv"
+      "first_fail": 19,
+      "benchmark_id": "blitz-capability-profile-light-1789805666319-7vvj2x"
     },
     "IO": {
-      "cap": 23,
+      "cap": 29,
       "status": "VARIABLE_LAST_STABLE",
-      "benchmark_id": "blitz-capability-profile-io-1789805221235-18l21t"
+      "benchmark_id": "blitz-capability-profile-io-1789805667657-jgnq9m"
     },
     "BUILD_TEST": {
-      "cap": 25,
+      "cap": 32,
       "status": "EXACT",
-      "first_fail": 26,
-      "benchmark_id": "blitz-capability-profile-build_test-1789805162688-c2lje9"
+      "first_fail": 33,
+      "benchmark_id": "blitz-capability-profile-build_test-1789805668895-ww62g1"
     },
     "CPU_HEAVY": {
       "cap": 39,
-      "status": "EXACT",
+      "status": "EXACT_HIGH_WATERMARK",
       "first_fail": 40,
-      "benchmark_id": "blitz-capability-profile-cpu_heavy-1789805218718-2bhjqg"
+      "benchmark_id": "blitz-capability-profile-cpu_heavy-1789805218718-2bhjqg",
+      "latest_variable_observation": {
+        "last_stable_observed": 34,
+        "benchmark_id": "blitz-capability-profile-cpu_heavy-1789805667559-e7vtqc"
+      }
     }
-  }
+  },
+  "resolution_policy": "LATEST_EXACT_OR_LATEST_LAST_STABLE_WITH_EXACT_HIGH_WATERMARK_PRESERVED"
 }
