@@ -98,30 +98,26 @@ async function kernelExecuteWithRecovery(c,task){
 
 const resultCache=new Map();
 let cacheDbPromise=null,lastPersistentPruneAt=0;
-let snapshotDbPromise=null,snapshotHits=0,snapshotMisses=0,snapshotWrites=0,fabricWatcher=null;
-function openSnapshotDb(){
-  if(!('indexedDB' in globalThis))return Promise.resolve(null);
-  if(snapshotDbPromise)return snapshotDbPromise;
-  snapshotDbPromise=new Promise(resolve=>{
-    try{
-      const req=indexedDB.open(SNAPSHOT_DB,1);
-      req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(SNAPSHOT_STORE))db.createObjectStore(SNAPSHOT_STORE,{keyPath:'key'})};
-      req.onsuccess=()=>resolve(req.result);req.onerror=()=>resolve(null);req.onblocked=()=>resolve(null)
-    }catch{resolve(null)}
-  });
-  return snapshotDbPromise
-}
+let snapshotHits=0,snapshotMisses=0,snapshotWrites=0,fabricWatcher=null;
 async function snapshotGet(key){
-  const db=await openSnapshotDb();if(!db)return null;
-  return await new Promise(resolve=>{try{const r=db.transaction(SNAPSHOT_STORE,'readonly').objectStore(SNAPSHOT_STORE).get(key);r.onsuccess=()=>resolve(r.result||null);r.onerror=()=>resolve(null)}catch{resolve(null)}})
+  const db=await openCacheDb();
+  if(!db){pushRuntimeEvent('snapshot_db_unavailable',{key,backend:'SHARED_L2_IDB'});return null}
+  return await new Promise(resolve=>{
+    try{
+      const req=db.transaction(IDB_STORE,'readonly').objectStore(IDB_STORE).get('snapshot:'+key);
+      req.onsuccess=()=>resolve(req.result||null);
+      req.onerror=()=>{pushRuntimeEvent('snapshot_get_failed',{key,message:String(req.error?.message||req.error||'request_error')});resolve(null)}
+    }catch(e){pushRuntimeEvent('snapshot_get_exception',{key,message:String(e?.message||e)});resolve(null)}
+  })
 }
 async function snapshotSet(key,tree){
-  const db=await openSnapshotDb();if(!db){pushRuntimeEvent('snapshot_db_unavailable',{key});return false}
+  const db=await openCacheDb();
+  if(!db){pushRuntimeEvent('snapshot_db_unavailable',{key,backend:'SHARED_L2_IDB'});return false}
   return await new Promise(resolve=>{
     try{
       const tree_json=JSON.stringify(tree);
-      const tx=db.transaction(SNAPSHOT_STORE,'readwrite');
-      tx.objectStore(SNAPSHOT_STORE).put({key,tree_json,stored_at:Date.now()});
+      const tx=db.transaction(IDB_STORE,'readwrite');
+      tx.objectStore(IDB_STORE).put({key:'snapshot:'+key,tree_json,stored_at:Date.now(),kind:'GOLDEN_SNAPSHOT'});
       tx.oncomplete=()=>resolve(true);
       tx.onerror=()=>{pushRuntimeEvent('snapshot_store_failed',{key,message:String(tx.error?.message||tx.error||'transaction_error')});resolve(false)};
       tx.onabort=()=>{pushRuntimeEvent('snapshot_store_aborted',{key,message:String(tx.error?.message||tx.error||'transaction_abort')});resolve(false)}
