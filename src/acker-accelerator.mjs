@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { compileSmartPacket } from './smart-packet.mjs';
+import { openBlitzResultCache } from './blitz-cache.mjs';
 
 const inputPath = process.argv[2];
 if (!inputPath) {
@@ -18,15 +19,27 @@ const state = new Map();
 const startedAt = Date.now();
 const WORKER_THREAD_CEILING_REFERENCE = 1791;
 const WEBCONTAINER_SAFE_PARALLEL_SLOTS = 57;
+const DEFAULT_CACHE_TTL_MS = 10 * 60 * 1000;
 const requestedConcurrency = Number(packet.max_concurrency ?? packet.concurrency ?? jobs.length);
 const maxConcurrency =
   Number.isFinite(requestedConcurrency) && requestedConcurrency >= 1
     ? Math.min(WEBCONTAINER_SAFE_PARALLEL_SLOTS, Math.floor(requestedConcurrency))
     : Math.min(WEBCONTAINER_SAFE_PARALLEL_SLOTS, Math.max(1, jobs.length));
+const cache = await openBlitzResultCache();
+let cacheHits = 0;
+let cacheMisses = 0;
+let cacheWrites = 0;
 
 function safeText(v, max = 12000) {
   const s = String(v ?? '');
   return s.length > max ? s.slice(-max) : s;
+}
+
+function cacheConfig(job) {
+  if (job.cache_safe !== true || typeof job.zeibael_fingerprint !== 'string') return null;
+  const ttl = Number(job.cache_ttl_ms ?? packet.cache_ttl_ms ?? DEFAULT_CACHE_TTL_MS);
+  if (!Number.isFinite(ttl) || ttl < 1) return null;
+  return { key: `job-v1:${job.zeibael_fingerprint}`, ttl };
 }
 
 async function runCommand(job) {
@@ -107,11 +120,38 @@ async function runInline(job) {
   }
 }
 
-async function execute(job) {
+async function executeUncached(job) {
   if (job.type === 'command') return runCommand(job);
   if (job.type === 'http') return runHttp(job);
   if (job.type === 'inline') return runInline(job);
   return { id: job.id, type: job.type, status: 'FAILED', duration_ms: 0, error: 'unsupported_job_type' };
+}
+
+async function execute(job) {
+  const cfg = cacheConfig(job);
+  if (cfg) {
+    const hit = cache.get(cfg.key);
+    if (hit?.result?.status === 'PASS') {
+      cacheHits++;
+      return {
+        ...hit.result,
+        id: job.id,
+        type: job.type,
+        duration_ms: 0,
+        cache_hit: true,
+        cache_stored_at: hit.stored_at,
+        cache_expires_at: hit.expires_at
+      };
+    }
+    cacheMisses++;
+  }
+
+  const result = await executeUncached(job);
+  if (cfg && result.status === 'PASS') {
+    cache.set(cfg.key, { ...result, cache_hit: false }, cfg.ttl);
+    cacheWrites++;
+  }
+  return { ...result, cache_hit: false };
 }
 
 function deps(job) {
@@ -155,7 +195,8 @@ while (pending.size || running.size) {
         type: job.type,
         status: 'BLOCKED',
         duration_ms: 0,
-        blocker: 'dependency_failed'
+        blocker: 'dependency_failed',
+        cache_hit: false
       });
     }
   }
@@ -170,19 +211,22 @@ while (pending.size || running.size) {
         type: job.type,
         status: 'BLOCKED',
         duration_ms: 0,
-        blocker: 'dependency_cycle_or_missing_dependency'
+        blocker: 'dependency_cycle_or_missing_dependency',
+        cache_hit: false
       });
     }
     pending.clear();
   }
 }
 
+await cache.flush();
+
 const results = jobs.map(j => state.get(j.id));
 const output = {
-  schema: 'zeibael.acker-accelerator.evidence.v2',
+  schema: 'zeibael.acker-accelerator.evidence.v3',
   task_id: packet.task_id || null,
   objective: packet.objective || null,
-  mode: 'SMART_ONE_SHOT_BOUNDED_MAX_READY_PARALLEL',
+  mode: 'SMART_ONE_SHOT_BOUNDED_MAX_READY_PARALLEL_PERSISTENT_CACHE',
   smart_mode: packet.smart_mode,
   planner: packet.planner || null,
   input_jobs_total: compiled.diagnostics.input_jobs,
@@ -194,6 +238,14 @@ const output = {
   max_concurrency: maxConcurrency,
   worker_thread_ceiling_reference: WORKER_THREAD_CEILING_REFERENCE,
   webcontainer_safe_parallel_slots: WEBCONTAINER_SAFE_PARALLEL_SLOTS,
+  cache: {
+    enabled: true,
+    policy: 'EXPLICIT_CACHE_SAFE_ONLY',
+    hits: cacheHits,
+    misses: cacheMisses,
+    writes: cacheWrites,
+    entries_after: cache.size()
+  },
   pass: results.filter(x => x?.status === 'PASS').length,
   failed: results.filter(x => x?.status === 'FAILED').length,
   blocked: results.filter(x => x?.status === 'BLOCKED').length,
@@ -211,11 +263,13 @@ const sentinel = {
   pass: output.pass,
   failed: output.failed,
   blocked: output.blocked,
-  dependency_graph_validated: output.dependency_graph_validated,
-  critical_path_scheduling: output.critical_path_scheduling,
+  cache_hits: output.cache.hits,
+  cache_misses: output.cache.misses,
   max_concurrency: output.max_concurrency,
   worker_thread_ceiling_reference: output.worker_thread_ceiling_reference,
   webcontainer_safe_parallel_slots: output.webcontainer_safe_parallel_slots,
+  dependency_graph_validated: output.dependency_graph_validated,
+  critical_path_scheduling: output.critical_path_scheduling,
   live_order_enabled: false
 };
 process.stdout.write('ZEIBAEL_SMART_ONE_SHOT=' + JSON.stringify(sentinel) + '\n');
