@@ -250,9 +250,9 @@ async function browserCanary() {
 
   const ok =
     initial.max_concurrency === 64 &&
-    initial.profile_caps?.LIGHT === 17 &&
-    initial.profile_caps?.IO === 23 &&
-    initial.profile_caps?.BUILD_TEST === 25 &&
+    initial.profile_caps?.LIGHT === 18 &&
+    initial.profile_caps?.IO === 29 &&
+    initial.profile_caps?.BUILD_TEST === 32 &&
     initial.profile_caps?.CPU_HEAVY === 39 &&
     idb.ok === true &&
     watchStart?.ok === true &&
