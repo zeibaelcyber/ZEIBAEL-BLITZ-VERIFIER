@@ -1,5 +1,11 @@
 import http from 'node:http';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer';
+
+const __dirname=path.dirname(fileURLToPath(import.meta.url));
+const WC_DIST=path.resolve(__dirname,'../node_modules/@webcontainer/api/dist');
 
 const CANDIDATE = Number(process.env.CANDIDATE || '1');
 const PORT = 4181;
@@ -10,12 +16,17 @@ if (!Number.isInteger(CANDIDATE) || CANDIDATE < 1) throw new Error('Invalid CAND
 const html = `<!doctype html><meta charset="utf-8"><title>ZEIBAEL Accelerator Probe</title>
 <pre id="status">BOOTING</pre><pre id="result"></pre>
 <script type="module">
-let WebContainer=null,lastImportError=null;
-for(const url of ['https://esm.sh/@webcontainer/api@1.6.4','https://cdn.jsdelivr.net/npm/@webcontainer/api@1.6.4/+esm']){
-  try{const mod=await import(url);if(typeof mod?.WebContainer==='function'){WebContainer=mod.WebContainer;break}}catch(e){lastImportError=String(e?.message||e)}
-}
 window.__done=false; window.__result=null;
-if(!WebContainer){window.__result={candidate:${CANDIDATE},ok:false,timeout:false,error:'WEBCONTAINER_IMPORT_FAILED:'+String(lastImportError||'unknown')};window.__done=true;throw new Error(window.__result.error)}
+let WebContainer=null;
+try{
+  const mod=await import('/wc/index.js');
+  WebContainer=mod?.WebContainer||null;
+}catch(e){
+  window.__result={candidate:${CANDIDATE},ok:false,timeout:false,error:'WEBCONTAINER_LOCAL_IMPORT_FAILED:'+String(e?.message||e)};
+  window.__done=true;
+  throw e;
+}
+if(typeof WebContainer!=='function'){window.__result={candidate:${CANDIDATE},ok:false,timeout:false,error:'WEBCONTAINER_LOCAL_IMPORT_INVALID'};window.__done=true;throw new Error(window.__result.error)}
 
 async function drain(proc){
   const r=proc.output.getReader();
@@ -82,13 +93,24 @@ async function persistEvidence(result){
   }catch(e){return {ok:false,error:String(e?.message||e),benchmark_id}}
 }
 
-const server=http.createServer((req,res)=>{
-  res.setHeader('content-type','text/html; charset=utf-8');
-  res.setHeader('cache-control','no-store');
-  res.setHeader('Cross-Origin-Opener-Policy','same-origin');
-  res.setHeader('Cross-Origin-Embedder-Policy','credentialless');
-  res.setHeader('Cross-Origin-Resource-Policy','same-origin');
-  res.end(html);
+const server=http.createServer(async(req,res)=>{
+  try{
+    const url=new URL(req.url||'/','http://127.0.0.1:'+PORT);
+    res.setHeader('cache-control','no-store');
+    res.setHeader('Cross-Origin-Opener-Policy','same-origin');
+    res.setHeader('Cross-Origin-Embedder-Policy','credentialless');
+    res.setHeader('Cross-Origin-Resource-Policy','same-origin');
+    if(url.pathname.startsWith('/wc/')){
+      const rel=url.pathname.slice('/wc/'.length);
+      const full=path.resolve(WC_DIST,rel);
+      if(!full.startsWith(WC_DIST+path.sep) && full!==path.join(WC_DIST,rel)){res.writeHead(403);res.end('forbidden');return}
+      const body=await fs.readFile(full);
+      res.setHeader('content-type',rel.endsWith('.js')?'text/javascript; charset=utf-8':'application/octet-stream');
+      res.end(body);return;
+    }
+    res.setHeader('content-type','text/html; charset=utf-8');
+    res.end(html);
+  }catch(e){res.writeHead(500,{'content-type':'text/plain; charset=utf-8'});res.end(String(e?.message||e))}
 });
 await new Promise(r=>server.listen(PORT,'127.0.0.1',r));
 
