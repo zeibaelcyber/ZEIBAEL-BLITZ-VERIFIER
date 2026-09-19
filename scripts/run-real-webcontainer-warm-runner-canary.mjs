@@ -108,8 +108,12 @@ async function main() {
         ["services/warm-runner/canary-probe.mjs"],
         { env: { PORT: "19091", ZEIBAEL_BURST_TOKEN: "selftest-token" } }
       );
-      const output = await collect(proc);
-      probeExit = await proc.exit;
+      const probeResult = await Promise.race([
+        (async()=>({ output: await collect(proc), exit: await proc.exit }))(),
+        new Promise((_,reject)=>setTimeout(()=>reject(new Error("WARM_RUNNER_PROBE_TIMEOUT_30S")),30000))
+      ]);
+      const output = probeResult.output;
+      probeExit = probeResult.exit;
       const marker = output.split(/\\r?\\n/).find(line => line.startsWith("BLITZ_WARM_RUNNER_SELFTEST="));
       if (!marker) throw new Error("WARM_RUNNER_SENTINEL_MISSING:" + output.slice(-4000));
       warm = JSON.parse(marker.slice("BLITZ_WARM_RUNNER_SELFTEST=".length));
