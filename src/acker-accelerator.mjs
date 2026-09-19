@@ -18,7 +18,7 @@ const executionRank = new Map(compiled.executionOrder.map((id, index) => [id, in
 const state = new Map();
 const startedAt = Date.now();
 const WORKER_THREAD_CEILING_REFERENCE = 1791;
-const DEFAULT_WEBCONTAINER_SAFE_PARALLEL_SLOTS = 57;
+const DEFAULT_WEBCONTAINER_SAFE_PARALLEL_SLOTS = 64;
 const configuredConcurrencyCap = Number(process.env.ZEIBAEL_MAX_CONCURRENCY || DEFAULT_WEBCONTAINER_SAFE_PARALLEL_SLOTS);
 const WEBCONTAINER_SAFE_PARALLEL_SLOTS =
   Number.isFinite(configuredConcurrencyCap) && configuredConcurrencyCap >= 1
