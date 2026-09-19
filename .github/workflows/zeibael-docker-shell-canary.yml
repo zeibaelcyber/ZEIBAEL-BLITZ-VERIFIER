@@ -1,0 +1,32 @@
+name: ZEIBAEL Docker Shell MCP Canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/zeibael-docker-shell-canary.yml"
+      - "scripts/zeibael_docker_shell_mcp.py"
+      - "scripts/zeibael-docker-shell-canary.mcp.json"
+      - "scripts/zeibael-docker-shell-canary.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.17"
+      - name: Record Docker runtime
+        run: |
+          docker version
+          docker info --format '{{json .SecurityOptions}}'
+      - name: Run Docker-isolated MCP canary
+        run: node scripts/zeibael-docker-shell-canary.mjs

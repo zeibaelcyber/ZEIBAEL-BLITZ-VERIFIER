@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "docker-shell": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--with",
+        "fastmcp==4.0.5",
+        "python",
+        "scripts/zeibael_docker_shell_mcp.py"
+      ],
+      "env": {
+        "ZEIBAEL_DOCKER_SANDBOX_IMAGE": "alpine:3.20.3"
+      }
+    }
+  }
+}
