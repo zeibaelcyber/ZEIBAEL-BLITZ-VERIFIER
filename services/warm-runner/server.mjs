@@ -138,7 +138,8 @@ function normalizeTasks(tasks){
 }
 async function runTasks(tasks,requestedConcurrency,workloadProfile){
   const normalized=normalizeTasks(tasks),results=new Array(normalized.length);
-  let hits=0,misses=0,writes=0,executed=0,attempts=0,cursor=0;
+  let hits=0,misses=0,writes=0,coalesced=0,executed=0,attempts=0,cursor=0;
+  const inFlightByKey=new Map();
   const selected=profileCap(workloadProfile);
   const effective=Math.max(1,Math.min(MAX_CONCURRENCY,selected.cap,Number(requestedConcurrency)||normalized.length,normalized.length));
 
@@ -149,21 +150,44 @@ async function runTasks(tasks,requestedConcurrency,workloadProfile){
       if(hit?.result?.ok===true){hits++;results[i]={...hit.result,id:task.id,cache_hit:true,elapsed_ms:0};return}
       misses++;
     }
-    let row;
-    try{row=await callTask(task)}
-    catch(e){row={id:task.id,ok:false,exit_code:1,elapsed_ms:0,output:"",error:"TASK_TRANSPORT_ERROR:"+String(e?.message||e)}}
-    attempts++;
-    if(mode==="INITIAL")executed++;
-    const result={
-      id:task.id,
-      ok:row.ok===true,
-      exit_code:row.exit_code,
-      elapsed_ms:row.elapsed_ms,
-      output:String(row.output||"").slice(-6000),
-      error:row.error||null,
-      cache_hit:false,
-      execution_mode:mode==="INITIAL"?"PERSISTENT_WARM_KERNEL":"PERSISTENT_WARM_KERNEL_ADAPTIVE_RETRY"
-    };
+
+    if(key&&inFlightByKey.has(key)){
+      const shared=await inFlightByKey.get(key);
+      coalesced++;
+      results[i]={
+        ...shared,
+        id:task.id,
+        elapsed_ms:0,
+        cache_hit:false,
+        coalesced:true,
+        execution_mode:mode==="INITIAL"?"PERSISTENT_WARM_KERNEL_COALESCED":"PERSISTENT_WARM_KERNEL_ADAPTIVE_RETRY_COALESCED"
+      };
+      return;
+    }
+
+    const attempt=(async()=>{
+      let row;
+      try{row=await callTask(task)}
+      catch(e){row={id:task.id,ok:false,exit_code:1,elapsed_ms:0,output:"",error:"TASK_TRANSPORT_ERROR:"+String(e?.message||e)}}
+      attempts++;
+      if(mode==="INITIAL")executed++;
+      return {
+        id:task.id,
+        ok:row.ok===true,
+        exit_code:row.exit_code,
+        elapsed_ms:row.elapsed_ms,
+        output:String(row.output||"").slice(-6000),
+        error:row.error||null,
+        cache_hit:false,
+        coalesced:false,
+        execution_mode:mode==="INITIAL"?"PERSISTENT_WARM_KERNEL":"PERSISTENT_WARM_KERNEL_ADAPTIVE_RETRY"
+      };
+    })();
+
+    if(key)inFlightByKey.set(key,attempt);
+    let result;
+    try{result=await attempt}
+    finally{if(key&&inFlightByKey.get(key)===attempt)inFlightByKey.delete(key)}
     results[i]=result;
     if(key&&result.ok){cache.set(key,result,DEFAULT_TTL);writes++}
   }
@@ -214,7 +238,7 @@ async function runTasks(tasks,requestedConcurrency,workloadProfile){
       max_retry_waves:1,
       retry_scope:"TRANSIENT_FAILED_TASKS_ONLY"
     },
-    cache:{hits,misses,writes,entries:cache.size()}
+    cache:{hits,misses,writes,coalesced,entries:cache.size()}
   };
 }
 
