@@ -1,118 +1,118 @@
 {
-  "task_id": "zeibael-model-router-decision-20260919",
-  "objective": "Fast safe model-router decision using current live ZEIBAEL provider state.",
+  "task_id": "zeibael-next-work-decision-20260919",
+  "objective": "Choose the highest-value safe next ZEIBAEL integration task after Gemini critical fallback recovery.",
   "max_concurrency": 16,
   "planner": {
     "openclaw": {
       "role": "PLAN_COMPACTOR",
       "runtime_verified": false,
       "advisory_only": true,
-      "trace_id": "decision-openclaw"
+      "trace_id": "next-openclaw"
     },
     "hermes": {
       "role": "PREVALIDATOR",
       "runtime_verified": false,
       "advisory_only": true,
-      "trace_id": "decision-hermes"
+      "trace_id": "next-hermes"
     }
   },
   "jobs": [
     {
-      "id": "chatgpt_surface",
+      "id": "gemini_recovered",
       "type": "inline",
-      "code": "const x={backend:false,gated:true};if(x.backend||!x.gated)throw new Error('chatgpt_surface_wrong');return x"
+      "code": "return {critical_routes_eligible:5,provider:'gemini_api',health:'HEALTHY',resource:'ACTIVE',trust:'QUALIFIED_FALLBACK',zero_spend_confidence:100}"
     },
     {
-      "id": "gemini_active",
+      "id": "router_patch_live",
       "type": "inline",
-      "code": "const x={backend:true,active:true};if(!x.backend||!x.active)throw new Error('gemini_inactive');return x"
+      "code": "return {resource_status_enforced:true,quota_exhaustion_blocked:true,unknown_quota_policy_enforced:true,route_order_before_quality:true}"
     },
     {
-      "id": "gemini_trust",
+      "id": "scheduler_fixed",
       "type": "inline",
-      "code": "const x={trust:'QUALIFIED_FALLBACK'};if(x.trust!=='QUALIFIED_FALLBACK')throw new Error('gemini_trust');return x"
+      "code": "return {provider:'cloudflare_control_plane',trust:'PRIMARY',health:'HEALTHY',resource:'ACTIVE'}"
     },
     {
-      "id": "gemini_zero_spend",
+      "id": "blitz_verified",
       "type": "inline",
-      "code": "const x={zero_spend_confidence:100};if(x.zero_spend_confidence!==100)throw new Error('gemini_zero_spend');return x"
+      "code": "return {primary_verifier:'stackblitz_webcontainer',exact_packet_pass:true,max_stable_concurrency:16}"
     },
     {
-      "id": "gemini_stale_health",
+      "id": "convex_plan_block",
       "type": "inline",
-      "code": "const x={fresh:false};if(x.fresh)throw new Error('gemini_expected_stale');return x"
+      "code": "return {team:'zeibaelcyber',project:'zeibael-trading-system',deployment:'shiny-spider-452',plan_family:'FREE_OR_STARTER',exact_plan_unknown:true,projection_enabled:false}"
     },
     {
-      "id": "critical_caps",
+      "id": "convex_write_guard",
       "type": "inline",
-      "code": "const x={count:5};if(x.count!==5)throw new Error('critical_caps');return x"
+      "code": "const x={exact_plan_unknown:true,write_canary:false};if(!x.exact_plan_unknown||x.write_canary)throw new Error('convex_write_should_hold');return x"
     },
     {
-      "id": "groq_noncritical",
+      "id": "upstash_block",
       "type": "inline",
-      "code": "const x={critical_caps:0};if(x.critical_caps!==0)throw new Error('groq_critical');return x"
+      "code": "return {oauth_required:true,account_plan_unverified:true,providers_disabled:true,user_action_required:true}"
     },
     {
-      "id": "cfai_noncritical",
+      "id": "honeycomb_state",
       "type": "inline",
-      "code": "const x={critical_allowed:false};if(x.critical_allowed)throw new Error('cfai_critical');return x"
+      "code": "return {default_window_query:true,custom_time_window:false,role:'PRIMARY_TRACING'}"
     },
     {
-      "id": "openrouter_noncritical",
+      "id": "posthog_state",
       "type": "inline",
-      "code": "const x={fresh:true,critical_allowed:false};if(!x.fresh||x.critical_allowed)throw new Error('openrouter_state');return x"
+      "code": "return {provenance_verified:true,role:'PRODUCT_TELEMETRY_SECONDARY'}"
     },
     {
-      "id": "router_patch",
+      "id": "repo_drift",
       "type": "inline",
-      "code": "const x={active_required:true,exhausted_blocked:true,unknown_policy_blocked:true,route_order_first:true};if(!Object.values(x).every(Boolean))throw new Error('router_patch');return x"
+      "code": "return {live_db_router_changed:true,repo_pr121_needs_sync:true,security_advisors_required:true,performance_advisors_required:true}"
     },
     {
-      "id": "scheduler",
+      "id": "risk_convex_write",
       "type": "inline",
-      "code": "const x={trust:'PRIMARY',health:'HEALTHY',resource:'ACTIVE'};if(x.trust!=='PRIMARY'||x.health!=='HEALTHY'||x.resource!=='ACTIVE')throw new Error('scheduler');return x"
+      "code": "return {risk:'HIGHER',value:'LOW_UNTIL_PLAN_PROVEN'}"
     },
     {
-      "id": "deploy_fallback",
+      "id": "risk_upstash_retry",
       "type": "inline",
-      "code": "const x={vercel:'GATED',hatchable:'ACTIVE'};if(x.vercel!=='GATED'||x.hatchable!=='ACTIVE')throw new Error('deploy_fallback');return x"
+      "code": "return {risk:'WASTE',value:'BLOCKED_ON_OAUTH'}"
     },
     {
-      "id": "catalog_only",
+      "id": "value_groq_refresh",
       "type": "inline",
-      "code": "return {generation:false,catalog_only:true}"
+      "code": "return {risk:'LOW',value:'SECONDARY_NONCRITICAL'}"
     },
     {
-      "id": "zero_spend_guard",
+      "id": "value_repo_sync",
       "type": "inline",
-      "code": "return {zero_spend_only:true,paid_fallback:false}"
+      "code": "return {risk:'LOW',value:'HIGH',reproducibility:true,rollback_ready:true}"
     },
     {
-      "id": "live_order_guard",
+      "id": "safety_guard",
       "type": "inline",
-      "code": "return {live_order_enabled:false}"
+      "code": "return {zero_spend_only:true,live_order_enabled:false,baseline_mutable:false,paid_fallback:false}"
     },
     {
       "id": "decision",
       "type": "inline",
       "depends_on": [
-        "chatgpt_surface",
-        "gemini_active",
-        "gemini_trust",
-        "gemini_zero_spend",
-        "gemini_stale_health",
-        "critical_caps",
-        "groq_noncritical",
-        "cfai_noncritical",
-        "openrouter_noncritical",
-        "router_patch",
-        "scheduler",
-        "deploy_fallback",
-        "catalog_only",
-        "zero_spend_guard",
-        "live_order_guard"
+        "gemini_recovered",
+        "router_patch_live",
+        "scheduler_fixed",
+        "blitz_verified",
+        "convex_plan_block",
+        "convex_write_guard",
+        "upstash_block",
+        "honeycomb_state",
+        "posthog_state",
+        "repo_drift",
+        "risk_convex_write",
+        "risk_upstash_retry",
+        "value_groq_refresh",
+        "value_repo_sync",
+        "safety_guard"
       ],
-      "code": "return {status:'PASS',decision:'REFRESH_GEMINI_ZERO_COST_CATALOG_FIRST',secondary:['OPTIONAL_GROQ_CATALOG_REFRESH','KEEP_CLOUDFLARE_AI_NONCRITICAL','KEEP_OPENROUTER_NONCRITICAL'],do_not:['PROMOTE_UNVERIFIED_CRITICAL_MODEL','ENABLE_LIVE_ORDER','USE_PAID_FALLBACK','BYPASS_RESOURCE_GATES'],max_stable_concurrency:16}"
+      "code": "return {status:'PASS',decision:'SYNC_LIVE_ROUTER_AND_PROVIDER_BOUNDARIES_TO_PR121_THEN_RUN_SUPABASE_ADVISORS',defer:['CONVEX_WRITE_CANARY_UNTIL_EXACT_PLAN','UPSTASH_ACTIVATION_UNTIL_OAUTH'],optional_later:['GROQ_ZERO_COST_CATALOG_REFRESH'],max_stable_concurrency:16,live_order_enabled:false}"
     }
   ]
 }
