@@ -117,6 +117,9 @@ async function browserCanary() {
   let stage = "initial";
   try {
     const initial = window.zeibaelProbe();
+    stage = "idb-init";
+    const cacheDbReady = await window.zeibaelEnsureCacheDb();
+    if(cacheDbReady !== true) throw new Error("CACHE_DB_INIT_FAILED");
     const idb = await idbSanity();
     stage = "watch";
     const watchStart = await window.zeibaelWatch({ path: "/zeibael-watch", recursive: true });
@@ -290,7 +293,7 @@ try {
   let lastState = null;
   while (Date.now() - readyStarted < 30000) {
     const r = await cdp.send("Runtime.evaluate", {
-      expression: 'JSON.stringify({ready:typeof window.zeibaelProbe==="function"&&typeof window.zeibaelWatch==="function"&&typeof window.zeibaelRun==="function"&&typeof window.zeibaelExportDigest==="function"&&typeof window.zeibaelRunEnvelope==="function"&&typeof window.zeibaelResetRuntime==="function",status:document.getElementById("status")?.textContent||null,coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,apis:{watch:typeof window.zeibaelWatch,run:typeof window.zeibaelRun,exportDigest:typeof window.zeibaelExportDigest,envelope:typeof window.zeibaelRunEnvelope,reset:typeof window.zeibaelResetRuntime}})',
+      expression: 'JSON.stringify({ready:typeof window.zeibaelProbe==="function"&&typeof window.zeibaelEnsureCacheDb==="function"&&typeof window.zeibaelWatch==="function"&&typeof window.zeibaelRun==="function"&&typeof window.zeibaelExportDigest==="function"&&typeof window.zeibaelRunEnvelope==="function"&&typeof window.zeibaelResetRuntime==="function",status:document.getElementById("status")?.textContent||null,coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,apis:{cacheDb:typeof window.zeibaelEnsureCacheDb,watch:typeof window.zeibaelWatch,run:typeof window.zeibaelRun,exportDigest:typeof window.zeibaelExportDigest,envelope:typeof window.zeibaelRunEnvelope,reset:typeof window.zeibaelResetRuntime}})',
       returnByValue: true,
     });
     if (typeof r?.result?.value === "string") {
