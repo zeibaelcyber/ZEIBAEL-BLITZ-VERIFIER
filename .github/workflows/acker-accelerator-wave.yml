@@ -1,10 +1,6 @@
 name: ZEIBAEL Acker Accelerator Wave
 
 on:
-  push:
-    paths:
-      - 'scripts/blitz-accelerator-probe.mjs'
-      - '.github/workflows/acker-accelerator-wave.yml'
   workflow_dispatch:
 
 permissions:
@@ -18,7 +14,7 @@ jobs:
   probe:
     strategy:
       fail-fast: false
-      max-parallel: 20
+      max-parallel: 8
       matrix:
         candidate: [16,24,32,48,57,64,80,96,128,192,256,384,512,768,1024,1280,1536,1791]
     runs-on: ubuntu-latest
