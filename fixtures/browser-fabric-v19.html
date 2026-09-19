@@ -1,0 +1,506 @@
+<!doctype html><meta charset="utf-8"><title>ZEIBAEL Blitz Free Fabric v2</title><body><pre id="status">BOOTING</pre><pre id="result"></pre><script>
+const status=document.getElementById('status'),resultEl=document.getElementById('result');
+window.zeibaelProbe=()=>({coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,hardwareConcurrency:navigator.hardwareConcurrency||null,deviceMemory:navigator.deviceMemory||null,ua:navigator.userAgent,status:status.textContent});
+</script><script type="module">
+import { WebContainer } from 'https://esm.sh/@webcontainer/api@1.6.4';
+const status=document.getElementById('status'),resultEl=document.getElementById('result');
+const MAX_CONCURRENCY=57,MAX_TASKS=512,MAX_CODE_BYTES=65536,DEFAULT_CACHE_TTL_MS=600000,MAX_CACHE_TTL_MS=86400000,MAX_CACHE_ENTRIES=1024,IDB_NAME='ZEIBAEL_BLITZ_FREE_FABRIC_V1',IDB_STORE='results',SNAPSHOT_DB='ZEIBAEL_BLITZ_GOLDEN_SNAPSHOT_V1',SNAPSHOT_STORE='snapshots';
+let wc=null,bootPromise=null,runSeq=0;
+const WARM_KERNEL_SOURCE="import { Worker } from \"node:worker_threads\";\nimport readline from \"node:readline\";\nconst rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});\nconst MAX_OUTPUT=6000;\nfunction trim(s){return String(s||\"\").slice(-MAX_OUTPUT)}\nasync function execute(req){\n  const started=performance.now();\n  const code=String(req.code||\"\");\n  const timeout=Math.max(100,Math.min(30000,Number(req.timeout_ms)||10000));\n  if(!code)return {request_id:req.request_id,id:req.id,ok:false,exit_code:2,elapsed_ms:0,error:\"empty_code\",output:\"\"};\n  return await new Promise((resolve)=>{\n    let out=\"\",err=\"\",done=false;\n    const url=new URL(\"data:text/javascript;base64,\"+Buffer.from(code,\"utf8\").toString(\"base64\"));\n    const worker=new Worker(url,{type:\"module\",stdout:true,stderr:true});\n    if(worker.stdout)worker.stdout.on(\"data\",(c)=>{out=trim(out+c.toString())});\n    if(worker.stderr)worker.stderr.on(\"data\",(c)=>{err=trim(err+c.toString())});\n    const finish=(ok,exitCode,error)=>{\n      if(done)return;done=true;clearTimeout(timer);\n      resolve({request_id:req.request_id,id:req.id,ok,exit_code:exitCode,elapsed_ms:Math.round(performance.now()-started),output:trim(out+(err?((out?\"\\n\":\"\")+err):\"\")),error:error?trim(error):undefined})\n    };\n    const timer=setTimeout(async()=>{try{await worker.terminate()}catch{}finish(false,124,\"timeout\")},timeout);\n    worker.once(\"error\",(e)=>finish(false,1,e&&e.stack||e&&e.message||String(e)));\n    worker.once(\"exit\",(code)=>finish(code===0,code,code===0?undefined:\"worker_exit_\"+code));\n  })\n}\nasync function handle(line){\n  let req;\n  try{req=JSON.parse(line)}catch{process.stdout.write(\"ZK1:\"+JSON.stringify({request_id:null,ok:false,error:\"invalid_json\"})+\"\\n\");return}\n  if(req&&req.command===\"ping\"){process.stdout.write(\"ZK1:\"+JSON.stringify({request_id:req.request_id,ok:true,pong:true,pid:process.pid})+\"\\n\");return}\n  const result=await execute(req||{});\n  process.stdout.write(\"ZK1:\"+JSON.stringify(result)+\"\\n\")\n}\nrl.on(\"line\",(line)=>{void handle(line)});\nprocess.stdout.write(\"ZK1_READY\\n\");\n";
+let kernelPromise=null,kernelProc=null,kernelWriter=null,kernelAlive=false,kernelSeq=0,kernelStarts=0,kernelRestarts=0,kernelBuffer="",kernelReadyResolve=null,kernelReadyReject=null;
+const kernelPending=new Map(),runtimeEvents=[];
+let eventListenersInstalled=false;
+function pushRuntimeEvent(type,detail={}){
+  runtimeEvents.push({at:new Date().toISOString(),type,detail});
+  if(runtimeEvents.length>256)runtimeEvents.splice(0,runtimeEvents.length-256)
+}
+function installRuntimeListeners(c){
+  if(eventListenersInstalled)return;
+  eventListenersInstalled=true;
+  try{c.on('error',e=>pushRuntimeEvent('webcontainer_error',{message:String(e?.message||e)}))}catch{}
+  try{c.on('server-ready',(port,url)=>pushRuntimeEvent('server_ready',{port,url}))}catch{}
+  try{c.on('port',(port,type,url)=>pushRuntimeEvent('port',{port,type,url}))}catch{}
+  try{c.on('preview-message',message=>pushRuntimeEvent('preview_message',{type:message?.type||null,port:message?.port||null,pathname:message?.pathname||null,message:message?.message||null}))}catch{}
+}
+function rejectKernelPending(error){
+  for(const [,p] of kernelPending){clearTimeout(p.timer);p.reject(error)}
+  kernelPending.clear()
+}
+function resetKernelState(reason='reset'){
+  if(kernelProc){try{kernelProc.kill()}catch{}}
+  kernelProc=null;kernelWriter=null;kernelAlive=false;kernelPromise=null;kernelBuffer='';
+  rejectKernelPending(new Error('KERNEL_RESET:'+reason));
+  pushRuntimeEvent('kernel_reset',{reason})
+}
+async function ensureKernel(c){
+  if(kernelAlive&&kernelProc&&kernelWriter)return kernelProc;
+  if(kernelPromise)return kernelPromise;
+  kernelPromise=(async()=>{
+    const root='/zeibael-kernel';
+    const hydration=await hydrateKernelFiles(c,root);
+    pushRuntimeEvent('kernel_hydration',hydration);
+    const proc=await c.spawn('node',['kernel.mjs'],{cwd:root});
+    kernelStarts++;kernelProc=proc;kernelAlive=true;
+    kernelWriter=proc.input.getWriter();
+    const ready=new Promise((resolve,reject)=>{kernelReadyResolve=resolve;kernelReadyReject=reject});
+    (async()=>{
+      const reader=proc.output.getReader();
+      try{
+        for(;;){
+          const item=await reader.read();if(item.done)break;
+          kernelBuffer+=item.value;
+          for(;;){
+            const nl=kernelBuffer.indexOf('\n');if(nl<0)break;
+            const line=kernelBuffer.slice(0,nl).trim();kernelBuffer=kernelBuffer.slice(nl+1);
+            if(!line)continue;
+            if(line==='ZK1_READY'){kernelReadyResolve?.(true);continue}
+            if(!line.startsWith('ZK1:')){pushRuntimeEvent('kernel_log',{line:line.slice(-500)});continue}
+            try{
+              const row=JSON.parse(line.slice(4)),pending=kernelPending.get(row.request_id);
+              if(pending){kernelPending.delete(row.request_id);clearTimeout(pending.timer);pending.resolve(row)}
+            }catch(e){pushRuntimeEvent('kernel_parse_error',{message:String(e?.message||e)})}
+          }
+        }
+      }catch(e){kernelReadyReject?.(e)}
+    })();
+    proc.exit.then(code=>{
+      if(kernelProc===proc){
+        kernelAlive=false;kernelProc=null;kernelWriter=null;kernelPromise=null;
+        rejectKernelPending(new Error('KERNEL_EXIT_'+code));
+        pushRuntimeEvent('kernel_exit',{code})
+      }
+    });
+    await Promise.race([ready,new Promise((_,reject)=>setTimeout(()=>reject(new Error('KERNEL_READY_TIMEOUT')),5000))]);
+    pushRuntimeEvent('kernel_ready',{starts:kernelStarts,restarts:kernelRestarts});
+    return proc
+  })().catch(e=>{resetKernelState('init_failed');throw e});
+  return kernelPromise
+}
+async function kernelExecute(c,task){
+  await ensureKernel(c);
+  const request_id='zk-'+(++kernelSeq);
+  return await new Promise(async(resolve,reject)=>{
+    const timeout=Math.max(500,Math.min(35000,Number(task.timeout_ms)||10000));
+    const timer=setTimeout(()=>{kernelPending.delete(request_id);reject(new Error('KERNEL_RESPONSE_TIMEOUT'))},timeout+3000);
+    kernelPending.set(request_id,{resolve,reject,timer});
+    try{await kernelWriter.write(JSON.stringify({request_id,id:task.id,code:task.code,timeout_ms:timeout})+'\n')}
+    catch(e){kernelPending.delete(request_id);clearTimeout(timer);reject(e)}
+  })
+}
+async function kernelExecuteWithRecovery(c,task){
+  try{return {...await kernelExecute(c,task),execution_mode:'WARM_KERNEL'}}
+  catch(first){
+    kernelRestarts++;resetKernelState('execute_failed');
+    try{return {...await kernelExecute(c,task),execution_mode:'WARM_KERNEL_RESTART'}}
+    catch(second){resetKernelState('recovery_failed');throw new Error('WARM_KERNEL_FAILED:'+String(second?.message||second))}
+  }
+}
+
+const resultCache=new Map();
+let cacheDbPromise=null,lastPersistentPruneAt=0;
+let snapshotDbPromise=null,snapshotHits=0,snapshotMisses=0,snapshotWrites=0,fabricWatcher=null;
+function openSnapshotDb(){
+  if(!('indexedDB' in globalThis))return Promise.resolve(null);
+  if(snapshotDbPromise)return snapshotDbPromise;
+  snapshotDbPromise=new Promise(resolve=>{
+    try{
+      const req=indexedDB.open(SNAPSHOT_DB,1);
+      req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(SNAPSHOT_STORE))db.createObjectStore(SNAPSHOT_STORE,{keyPath:'key'})};
+      req.onsuccess=()=>resolve(req.result);req.onerror=()=>resolve(null);req.onblocked=()=>resolve(null)
+    }catch{resolve(null)}
+  });
+  return snapshotDbPromise
+}
+async function snapshotGet(key){
+  const db=await openSnapshotDb();if(!db)return null;
+  return await new Promise(resolve=>{try{const r=db.transaction(SNAPSHOT_STORE,'readonly').objectStore(SNAPSHOT_STORE).get(key);r.onsuccess=()=>resolve(r.result||null);r.onerror=()=>resolve(null)}catch{resolve(null)}})
+}
+async function snapshotSet(key,tree){
+  const db=await openSnapshotDb();if(!db)return false;
+  return await new Promise(resolve=>{try{const tx=db.transaction(SNAPSHOT_STORE,'readwrite');tx.objectStore(SNAPSHOT_STORE).put({key,tree,stored_at:Date.now()});tx.oncomplete=()=>resolve(true);tx.onerror=()=>resolve(false);tx.onabort=()=>resolve(false)}catch{resolve(false)}})
+}
+async function hydrateKernelFiles(c,root){
+  const key='warm-kernel-v1';
+  const snap=await snapshotGet(key);
+  if(snap?.tree){
+    try{await c.mount(snap.tree,{mountPoint:root});snapshotHits++;pushRuntimeEvent('snapshot_hit',{key});return {source:'SNAPSHOT'}}
+    catch(e){pushRuntimeEvent('snapshot_mount_failed',{message:String(e?.message||e)})}
+  }
+  snapshotMisses++;
+  await c.fs.mkdir(root,{recursive:true});
+  await c.fs.writeFile(root+'/kernel.mjs',WARM_KERNEL_SOURCE);
+  try{
+    const tree=await c.export(root,{format:'json'});
+    if(await snapshotSet(key,tree)){snapshotWrites++;pushRuntimeEvent('snapshot_write',{key})}
+  }catch(e){pushRuntimeEvent('snapshot_export_failed',{message:String(e?.message||e)})}
+  return {source:'SOURCE_WRITE'}
+}
+
+function openCacheDb(){
+  if(!('indexedDB' in globalThis))return Promise.resolve(null);
+  if(cacheDbPromise)return cacheDbPromise;
+  cacheDbPromise=new Promise(resolve=>{
+    try{
+      const req=indexedDB.open(IDB_NAME,1);
+      req.onupgradeneeded=()=>{
+        const db=req.result;
+        const store=db.objectStoreNames.contains(IDB_STORE)?req.transaction.objectStore(IDB_STORE):db.createObjectStore(IDB_STORE,{keyPath:'key'});
+        if(!store.indexNames.contains('expires_at'))store.createIndex('expires_at','expires_at');
+        if(!store.indexNames.contains('stored_at'))store.createIndex('stored_at','stored_at');
+      };
+      req.onsuccess=()=>resolve(req.result);
+      req.onerror=()=>resolve(null);
+      req.onblocked=()=>resolve(null);
+    }catch{resolve(null)}
+  });
+  return cacheDbPromise
+}
+async function idbGet(key){
+  const db=await openCacheDb();if(!db)return null;
+  return await new Promise(resolve=>{
+    try{
+      const req=db.transaction(IDB_STORE,'readonly').objectStore(IDB_STORE).get(key);
+      req.onsuccess=()=>resolve(req.result||null);
+      req.onerror=()=>resolve(null)
+    }catch{resolve(null)}
+  })
+}
+async function idbGetMany(keys){
+  const unique=[...new Set((keys||[]).filter(Boolean))];
+  const out=new Map();
+  if(unique.length===0)return out;
+  const db=await openCacheDb();if(!db)return out;
+  return await new Promise(resolve=>{
+    try{
+      const tx=db.transaction(IDB_STORE,'readonly'),store=tx.objectStore(IDB_STORE);
+      for(const key of unique){
+        const req=store.get(key);
+        req.onsuccess=()=>{if(req.result)out.set(key,req.result)}
+      }
+      tx.oncomplete=()=>resolve(out);
+      tx.onerror=()=>resolve(out);
+      tx.onabort=()=>resolve(out)
+    }catch{resolve(out)}
+  })
+}
+async function idbSetMany(entries){
+  const valid=(entries||[]).filter(Boolean);
+  if(valid.length===0)return {available:cacheDbPromise!==null,writes:0,transactions:0};
+  const db=await openCacheDb();if(!db)return {available:false,writes:0,transactions:0};
+  return await new Promise(resolve=>{
+    try{
+      const tx=db.transaction(IDB_STORE,'readwrite'),store=tx.objectStore(IDB_STORE);
+      for(const entry of valid)store.put(entry);
+      tx.oncomplete=()=>resolve({available:true,writes:valid.length,transactions:1});
+      tx.onerror=()=>resolve({available:true,writes:0,transactions:1});
+      tx.onabort=()=>resolve({available:true,writes:0,transactions:1})
+    }catch{resolve({available:true,writes:0,transactions:0})}
+  })
+}
+async function prunePersistentCache(){
+  const db=await openCacheDb();if(!db)return {available:false,deleted:0,skipped:false};
+  const now=Date.now();
+  if(now-lastPersistentPruneAt<60000)return {available:true,deleted:0,skipped:true};
+  lastPersistentPruneAt=now;
+  return await new Promise(resolve=>{
+    let deleted=0;
+    try{
+      const tx=db.transaction(IDB_STORE,'readwrite'),store=tx.objectStore(IDB_STORE);
+      const req=store.openCursor();
+      req.onsuccess=()=>{
+        const cur=req.result;
+        if(!cur)return;
+        if(!cur.value||cur.value.expires_at<=now){cur.delete();deleted++}
+        cur.continue()
+      };
+      tx.oncomplete=async()=>{
+        try{
+          const count=await new Promise(r=>{
+            const t=db.transaction(IDB_STORE,'readonly').objectStore(IDB_STORE).count();
+            t.onsuccess=()=>r(Number(t.result||0));t.onerror=()=>r(0)
+          });
+          if(count<=MAX_CACHE_ENTRIES)return resolve({available:true,deleted,skipped:false});
+          const excess=count-MAX_CACHE_ENTRIES;
+          const tx2=db.transaction(IDB_STORE,'readwrite'),idx=tx2.objectStore(IDB_STORE).index('stored_at'),curReq=idx.openCursor();
+          let removed=0;
+          curReq.onsuccess=()=>{const cur=curReq.result;if(!cur||removed>=excess)return;cur.delete();removed++;cur.continue()};
+          tx2.oncomplete=()=>resolve({available:true,deleted:deleted+removed,skipped:false});
+          tx2.onerror=()=>resolve({available:true,deleted,skipped:false})
+        }catch{resolve({available:true,deleted})}
+      };
+      tx.onerror=()=>resolve({available:true,deleted})
+    }catch{resolve({available:true,deleted})}
+  })
+}
+
+async function boot(){
+  if(wc)return wc;
+  if(!bootPromise)bootPromise=WebContainer.boot({coep:'credentialless',forwardPreviewErrors:'exceptions-only'}).then(x=>{wc=x;installRuntimeListeners(x);status.textContent='READY';pushRuntimeEvent('webcontainer_ready',{});return x}).catch(e=>{status.textContent='BOOT_ERROR:'+e.message;bootPromise=null;pushRuntimeEvent('boot_error',{message:String(e?.message||e)});throw e});
+  return bootPromise
+}
+async function collect(proc){
+  let out='';const r=proc.output.getReader();
+  for(;;){const x=await r.read();if(x.done)break;out+=x.value;if(out.length>131072)out=out.slice(-131072)}
+  return out
+}
+function pruneCache(){
+  const now=Date.now();
+  for(const [k,v] of resultCache){if(!v||v.expires_at<=now)resultCache.delete(k)}
+  if(resultCache.size<=MAX_CACHE_ENTRIES)return;
+  const a=[...resultCache.entries()].sort((x,y)=>(x[1].stored_at||0)-(y[1].stored_at||0));
+  for(const [k] of a.slice(0,resultCache.size-MAX_CACHE_ENTRIES))resultCache.delete(k)
+}
+async function hashCode(code){
+  const b=new TextEncoder().encode(code);
+  const d=await crypto.subtle.digest('SHA-256',b);
+  return Array.from(new Uint8Array(d)).map(x=>x.toString(16).padStart(2,'0')).join('')
+}
+async function cacheKey(task){
+  if(task?.cache_safe!==true)return null;
+  return 'code-v2:'+await hashCode(task.code)
+}
+function normalizeTasks(tasks){
+  if(!Array.isArray(tasks)||tasks.length<1||tasks.length>MAX_TASKS)throw new Error('tasks_1_to_'+MAX_TASKS+'_required');
+  const enc=new TextEncoder();
+  return tasks.map((t,i)=>{
+    const id=typeof t?.id==='string'?t.id.slice(0,64):'task-'+(i+1);
+    const code=typeof t?.code==='string'?t.code:'';
+    if(!code||enc.encode(code).byteLength>MAX_CODE_BYTES)throw new Error('task_code_invalid:'+id);
+    return{id,code,cache_safe:t?.cache_safe===true,kernel_safe:t?.kernel_safe===true,cache_ttl_ms:Number(t?.cache_ttl_ms)||null,timeout_ms:Math.max(500,Math.min(30000,Number(t?.timeout_ms)||10000))}
+  })
+}
+window.zeibaelProbe=()=>({coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,hardwareConcurrency:navigator.hardwareConcurrency||null,deviceMemory:navigator.deviceMemory||null,ua:navigator.userAgent,status:status.textContent,l1_cache_entries:resultCache.size,l2_cache:'INDEXEDDB_FAIL_OPEN',max_concurrency:MAX_CONCURRENCY,kernel_alive:kernelAlive,kernel_starts:kernelStarts,kernel_restarts:kernelRestarts,snapshot_hits:snapshotHits,snapshot_misses:snapshotMisses,snapshot_writes:snapshotWrites,event_count:runtimeEvents.length});
+window.zeibaelEvents=()=>runtimeEvents.slice();
+window.zeibaelClearL1Cache=()=>{const before=resultCache.size;resultCache.clear();return before};
+window.zeibaelResetRuntime=async()=>{resetKernelState('manual_reset');if(fabricWatcher){try{fabricWatcher.close()}catch{}fabricWatcher=null}if(wc){try{wc.teardown()}catch{}}wc=null;bootPromise=null;eventListenersInstalled=false;status.textContent='READY_LAZY';return {ok:true}};
+window.zeibaelWatch=async({path='/zeibael-fabric',recursive=true}={})=>{
+  const c=await boot();if(fabricWatcher){try{fabricWatcher.close()}catch{}}
+  try{await c.fs.mkdir(path,{recursive:true})}catch{}
+  fabricWatcher=c.fs.watch(path,{recursive:recursive!==false},(event,filename)=>pushRuntimeEvent('fs_change',{path,event,filename:String(filename||'')}));
+  pushRuntimeEvent('watch_started',{path,recursive:recursive!==false});return {ok:true,path,recursive:recursive!==false}
+};
+window.zeibaelStopWatch=()=>{if(fabricWatcher){try{fabricWatcher.close()}catch{}fabricWatcher=null;pushRuntimeEvent('watch_stopped',{})}return {ok:true}};
+window.zeibaelExportDigest=async({path='/',format='json'}={})=>{
+  const c=await boot(),data=await c.export(path,{format});
+  const raw=format==='json'?new TextEncoder().encode(JSON.stringify(data)):data;
+  const digest=await crypto.subtle.digest('SHA-256',raw);
+  const sha256=Array.from(new Uint8Array(digest)).map(x=>x.toString(16).padStart(2,'0')).join('');
+  pushRuntimeEvent('export_digest',{path,format,bytes:raw.byteLength,sha256});
+  return {ok:true,path,format,bytes:raw.byteLength,sha256}
+};
+window.zeibaelRunEnvelope=async(envelope)=>{
+  if(!envelope||envelope.schema!=='zeibael.blitz.route.v2')throw new Error('invalid_route_schema');
+  if(envelope.live_order_enabled===true)throw new Error('live_order_forbidden');
+  if(envelope.canonical_state&&envelope.canonical_state!=='SUPABASE')throw new Error('canonical_state_mismatch');
+  if(envelope.credential_exposure_allowed===true)throw new Error('credential_exposure_forbidden');
+  if(envelope.execution_class!=='LOCAL_BLITZ'||envelope.broker_required===true){
+    return {ok:true,status:'BROKER_REQUIRED',executed:false,provider_key:envelope.provider_key||null,capability_key:envelope.capability_key||null,execution_class:envelope.execution_class||null,canonical_state:'SUPABASE',live_order_enabled:false}
+  }
+  const result=await window.zeibaelRun({tasks:envelope.tasks,concurrency:envelope.concurrency,cache_ttl_ms:envelope.cache_ttl_ms});
+  return {...result,route:{provider_key:envelope.provider_key||null,capability_key:envelope.capability_key||null,execution_class:'LOCAL_BLITZ'},canonical_state:'SUPABASE',live_order_enabled:false}
+};
+window.zeibaelRun=async({tasks,concurrency,cache_ttl_ms}={})=>{
+  const started=performance.now(),normalized=normalizeTasks(tasks);
+  pruneCache();
+  const persistentPrune=await prunePersistentCache().catch(()=>({available:false,deleted:0,skipped:false}));
+  const cacheMeta=await Promise.all(normalized.map(async t=>({key:await cacheKey(t),task:t})));
+  const lookupNow=Date.now();
+  const keysNeedingL2=[...new Set(cacheMeta.map(x=>x.key).filter(key=>{
+    if(!key)return false;
+    const hit=resultCache.get(key);
+    return !hit||hit.expires_at<=lookupNow||hit.result?.ok!==true
+  }))];
+  const persistentHits=await idbGetMany(keysNeedingL2);
+  const results=new Array(normalized.length),misses=[],coalesced=[];
+  const missLeaderByKey=new Map();
+  const persistentPending=[];
+  let cacheHits=0,cacheL1Hits=0,cacheL2Hits=0,cacheMisses=0,cacheWrites=0,persistentWrites=0,persistentWriteTransactions=0,coalescedTasks=0;
+  for(let i=0;i<cacheMeta.length;i++){
+    const meta=cacheMeta[i];
+    let hit=meta.key?resultCache.get(meta.key):null,layer=hit?'L1':null;
+    if((!hit||hit.expires_at<=Date.now()||hit.result?.ok!==true)&&meta.key){
+      hit=persistentHits.get(meta.key)||null;
+      if(hit&&hit.expires_at>Date.now()&&hit.result?.ok===true){
+        layer='L2';
+        resultCache.set(meta.key,hit)
+      }else hit=null
+    }
+    if(hit&&hit.expires_at>Date.now()&&hit.result?.ok===true){
+      cacheHits++;
+      if(layer==='L1')cacheL1Hits++; else cacheL2Hits++;
+      results[i]={...hit.result,id:meta.task.id,elapsed_ms:0,cache_hit:true,cache_layer:layer,cache_stored_at:hit.stored_at}
+    }else if(meta.key&&missLeaderByKey.has(meta.key)){
+      coalescedTasks++;
+      coalesced.push({index:i,leaderIndex:missLeaderByKey.get(meta.key),task:meta.task})
+    }else{
+      if(meta.key){
+        cacheMisses++;
+        missLeaderByKey.set(meta.key,i)
+      }
+      misses.push({index:i,...meta})
+    }
+  }
+  const n=Math.max(1,Math.min(MAX_CONCURRENCY,Number.isFinite(Number(concurrency))?Math.floor(Number(concurrency)):misses.length||1,misses.length||1));
+  let warmKernelExecuted=0,warmKernelFallbacks=0,coldSpawnExecuted=0;
+  if(misses.length){
+    const c=await boot();
+    const warmMisses=misses.filter(x=>x.task.kernel_safe===true),coldMisses=misses.filter(x=>x.task.kernel_safe!==true);
+    async function persistSuccess(miss,row){
+      results[miss.index]=row;
+      if(miss.key&&row.ok){
+        const ttl=Math.min(MAX_CACHE_TTL_MS,Math.max(1,Number(miss.task.cache_ttl_ms||cache_ttl_ms||DEFAULT_CACHE_TTL_MS)));
+        const entry={key:miss.key,stored_at:Date.now(),expires_at:Date.now()+ttl,result:{...row,cache_hit:false,cache_layer:null}};
+        resultCache.set(miss.key,entry);cacheWrites++;persistentPending.push(entry)
+      }
+    }
+    if(warmMisses.length){
+      let cursor=0;
+      async function warmWorker(){
+        for(;;){
+          const j=cursor++;if(j>=warmMisses.length)return;
+          const miss=warmMisses[j],t0=performance.now();
+          try{
+            const row=await kernelExecuteWithRecovery(c,miss.task);warmKernelExecuted++;
+            await persistSuccess(miss,{id:miss.task.id,ok:row.ok===true,exit_code:Number(row.exit_code??0),elapsed_ms:Number(row.elapsed_ms||Math.round(performance.now()-t0)),output:String(row.output||'').slice(-6000),error:row.error?String(row.error).slice(-1000):undefined,cache_hit:false,execution_mode:row.execution_mode})
+          }catch(e){
+            warmKernelFallbacks++;
+            const runRoot='/zeibael-runs/fallback-'+Date.now()+'-'+(++runSeq);
+            try{
+              await c.fs.mkdir(runRoot,{recursive:true});
+              await c.mount({'task.mjs':{file:{contents:miss.task.code}}},{mountPoint:runRoot});
+              const p=await c.spawn('node',['task.mjs'],{cwd:runRoot}),output=await collect(p),exit=await p.exit;coldSpawnExecuted++;
+              await persistSuccess(miss,{id:miss.task.id,ok:exit===0,exit_code:exit,elapsed_ms:Math.round(performance.now()-t0),output:output.slice(-6000),cache_hit:false,execution_mode:'COLD_SPAWN_FALLBACK'})
+            }catch(fallbackError){results[miss.index]={id:miss.task.id,ok:false,elapsed_ms:Math.round(performance.now()-t0),error:String(fallbackError?.message||fallbackError),cache_hit:false,execution_mode:'COLD_SPAWN_FALLBACK_FAILED'}}
+            finally{try{await c.fs.rm(runRoot,{recursive:true,force:true})}catch{}}
+          }
+        }
+      }
+      const warmN=Math.max(1,Math.min(n,warmMisses.length));
+      await Promise.all(Array.from({length:warmN},warmWorker))
+    }
+    if(coldMisses.length){
+      const runRoot='/zeibael-runs/run-'+Date.now()+'-'+(++runSeq);
+      await c.fs.mkdir(runRoot,{recursive:true});
+      const tree={};for(let j=0;j<coldMisses.length;j++)tree['task-'+(j+1)+'.mjs']={file:{contents:coldMisses[j].task.code}};
+      await c.mount(tree,{mountPoint:runRoot});
+      let cursor=0;
+      async function coldWorker(){
+        for(;;){
+          const j=cursor++;if(j>=coldMisses.length)return;
+          const miss=coldMisses[j],t0=performance.now();
+          try{
+            const p=await c.spawn('node',['task-'+(j+1)+'.mjs'],{cwd:runRoot}),output=await collect(p),exit=await p.exit;coldSpawnExecuted++;
+            await persistSuccess(miss,{id:miss.task.id,ok:exit===0,exit_code:exit,elapsed_ms:Math.round(performance.now()-t0),output:output.slice(-6000),cache_hit:false,execution_mode:'COLD_SPAWN'})
+          }catch(e){results[miss.index]={id:miss.task.id,ok:false,elapsed_ms:Math.round(performance.now()-t0),error:String(e?.message||e),cache_hit:false,execution_mode:'COLD_SPAWN_FAILED'}}
+        }
+      }
+      const coldN=Math.max(1,Math.min(n,coldMisses.length));
+      await Promise.all(Array.from({length:coldN},coldWorker));
+      try{await c.fs.rm(runRoot,{recursive:true,force:true})}catch{}
+    }
+    const persisted=await idbSetMany(persistentPending);
+    persistentWrites=persisted.writes;persistentWriteTransactions=persisted.transactions;
+  }
+  for(const alias of coalesced){
+    const leader=results[alias.leaderIndex];
+    results[alias.index]=leader?{...leader,id:alias.task.id,elapsed_ms:0,cache_hit:false,cache_layer:'IN_PACKET_COALESCED',coalesced_from:leader.id}:{id:alias.task.id,ok:false,elapsed_ms:0,error:'coalesced_leader_missing',cache_hit:false,cache_layer:'IN_PACKET_COALESCED'}
+  }
+  pruneCache();
+  return{ok:results.every(x=>x&&x.ok),runtime:'STACKBLITZ_WEBCONTAINER_FREE_FABRIC_V2',requested_concurrency:Number(concurrency)||normalized.length,concurrency:n,tasks:normalized.length,executed_tasks:misses.length,compute_elapsed_ms:Math.round(performance.now()-started),warm_kernel:{eligible:misses.filter(x=>x.task.kernel_safe===true).length,executed:warmKernelExecuted,fallbacks:warmKernelFallbacks,starts:kernelStarts,restarts:kernelRestarts,alive:kernelAlive},cold_spawn:{executed:coldSpawnExecuted},events:{count:runtimeEvents.length,latest:runtimeEvents.slice(-8)},cache:{hits:cacheHits,l1_hits:cacheL1Hits,l2_hits:cacheL2Hits,misses:cacheMisses,coalesced:coalescedTasks,writes:cacheWrites,persistent_writes:persistentWrites,l2_batch_write_entries:persistentPending.length,l2_write_transactions:persistentWriteTransactions,l1_entries:resultCache.size,l2_available:persistentPrune.available,l2_pruned:persistentPrune.deleted,l2_prune_skipped:persistentPrune.skipped,l2_batch_lookup_keys:keysNeedingL2.length,policy:'EXPLICIT_CACHE_SAFE_ONLY_PASS_RESULTS',max_ttl_ms:MAX_CACHE_TTL_MS},results,live_order_enabled:false}
+};
+function mk(id,code){return{id,code}}
+function suite(mult){const a=[];for(let k=0;k<mult;k++){
+a.push(mk('crypto-'+k,'import crypto from "node:crypto";const h=crypto.createHash("sha256").update("ZEIBAEL_"+String('+k+')).digest("hex");if(h.length!==64)process.exit(1);console.log("ok")'));
+a.push(mk('budget-'+k,'if(24*12*10+10!==2890)process.exit(1);console.log("ok")'));
+a.push(mk('clamp-'+k,'const M=8,f=v=>v===undefined?M:(!Number.isFinite(Number(v))||Number(v)<1?null:Math.max(1,Math.min(M,Math.floor(Number(v)))));const c=[[undefined,8],[0,null],[1,1],[4,4],[8,8],[9,8],[99,8],["bad",null],[1.9,1]];if(c.some(x=>f(x[0])!==x[1]))process.exit(1);console.log("ok")'));
+a.push(mk('batch-'+k,'const R=50,T=28672,M=8,e=new TextEncoder(),agents=Array.from({length:100},(_,i)=>({presenceKey:"worker:"+String(i),runId:"r",agentKey:"a",workerStatus:"RUNNING",sourceSurface:"SUPABASE_CONVEX_AGENT_PROJECTION_FEED_V2"}));let b=[],c=[];for(const x of agents){const d=c.concat([x]),z=e.encode(JSON.stringify({agents:d,observedAtMs:1})).byteLength;if(c.length&&(d.length>R||z>T)){b.push(c);c=[x]}else c=d;if(b.length>M)process.exit(1)}if(c.length)b.push(c);if(b.reduce((s,x)=>s+x.length,0)!==100||b.length>M)process.exit(1);console.log("ok")'));
+a.push(mk('payload-'+k,'const e=new TextEncoder(),MAX=32768;if(e.encode(JSON.stringify({x:"a".repeat(1024)})).byteLength>=MAX)process.exit(1);if(e.encode(JSON.stringify({x:"a".repeat(MAX+256)})).byteLength<=MAX)process.exit(1);console.log("ok")'));
+a.push(mk('retention-'+k,'const days=[7,7,30,30],limit=200,passes=5;if(days.some(x=>x<1)||limit!==200||passes!==5)process.exit(1);console.log("ok")'));
+a.push(mk('fuzz-'+k,'const M=8,f=v=>{const n=Number(v);if(!Number.isFinite(n)||n<1)return null;return Math.max(1,Math.min(M,Math.floor(n)))};for(let i=0;i<25000;i++){const v=(Math.random()-.15)*5000,r=f(v);if(r!==null&&(r<1||r>M||!Number.isInteger(r)))process.exit(1)}console.log("ok")'));
+a.push(mk('cpu-'+k,'let x=0;for(let i=0;i<3000000;i++)x=(x+i)%1000000007;if(!Number.isFinite(x))process.exit(1);console.log(x)'));
+}return a}
+async function withTimeout(p,ms){let t;try{return await Promise.race([p,new Promise((_,rej)=>t=setTimeout(()=>rej(new Error('STEP_TIMEOUT')),ms))])}finally{clearTimeout(t)}}
+async function warmKernelAutotest(){
+  const p=new URLSearchParams(location.search);if(p.get('autotest')!=='warm-kernel')return false;
+  status.textContent='BLITZ_WARM_KERNEL_TEST';
+  try{
+    const first=await withTimeout(window.zeibaelRun({tasks:[
+      {id:'wk-a',code:'import crypto from "node:crypto";console.log(crypto.createHash("sha256").update("A").digest("hex").slice(0,8))',kernel_safe:true},
+      {id:'wk-b',code:'console.log(21*2)',kernel_safe:true}
+    ],concurrency:2}),15000);
+    const startsAfterFirst=kernelStarts;
+    const second=await withTimeout(window.zeibaelRun({tasks:[
+      {id:'wk-c',code:'console.log("reuse")',kernel_safe:true},
+      {id:'wk-d',code:'console.log(6*7)',kernel_safe:true}
+    ],concurrency:2}),15000);
+    const ok=first.ok===true&&second.ok===true&&startsAfterFirst===1&&kernelStarts===1&&first.warm_kernel.executed===2&&second.warm_kernel.executed===2&&second.warm_kernel.fallbacks===0;
+    const evidence={schema:'zeibael.blitz.warm-kernel-canary.v1',ok,first_ms:first.compute_elapsed_ms,second_ms:second.compute_elapsed_ms,kernel_starts:kernelStarts,kernel_restarts:kernelRestarts,first:first.warm_kernel,second:second.warm_kernel,events:runtimeEvents.slice(-12),live_order_enabled:false,baseline_lock:'BO-ABSORPTION-1H-P1000-v1.0'};
+    status.textContent=ok?'BLITZ_WARM_KERNEL_PASS':'BLITZ_WARM_KERNEL_FAIL';resultEl.textContent='BLITZ_WARM_KERNEL_CANARY='+JSON.stringify(evidence);return true
+  }catch(e){status.textContent='BLITZ_WARM_KERNEL_ERROR';resultEl.textContent='BLITZ_WARM_KERNEL_CANARY='+JSON.stringify({schema:'zeibael.blitz.warm-kernel-canary.v1',ok:false,error:String(e?.message||e),live_order_enabled:false});return true}
+}
+async function cacheL2Autotest(){
+  const p=new URLSearchParams(location.search);if(p.get('autotest')!=='cache-l2')return false;
+  status.textContent='BLITZ_CACHE_L2_TEST';
+  try{
+    const tasks=[
+      {id:'cache-l2-a',code:'console.log("A")',cache_safe:true,cache_ttl_ms:600000},
+      {id:'cache-l2-b',code:'console.log("B")',cache_safe:true,cache_ttl_ms:600000}
+    ];
+    const first=await withTimeout(window.zeibaelRun({tasks,concurrency:2}),15000);
+    const cleared=window.zeibaelClearL1Cache();
+    const second=await withTimeout(window.zeibaelRun({tasks,concurrency:2}),15000);
+    const ok=first.ok===true&&second.ok===true&&
+      first.cache.l2_hits===0&&
+      second.cache.l2_hits===2&&
+      second.executed_tasks===0&&
+      second.results.every(x=>x.cache_hit===true&&x.cache_layer==='L2');
+    const evidence={
+      schema:'zeibael.blitz.cache-l2-canary.v1',
+      ok,
+      first:{executed_tasks:first.executed_tasks,cache:first.cache},
+      l1_cleared:cleared,
+      second:{executed_tasks:second.executed_tasks,cache:second.cache,layers:second.results.map(x=>x.cache_layer)},
+      live_order_enabled:false,
+      baseline_lock:'BO-ABSORPTION-1H-P1000-v1.0'
+    };
+    status.textContent=ok?'BLITZ_CACHE_L2_PASS':'BLITZ_CACHE_L2_FAIL';
+    resultEl.textContent='BLITZ_CACHE_L2_CANARY='+JSON.stringify(evidence);
+    return true;
+  }catch(e){
+    status.textContent='BLITZ_CACHE_L2_ERROR';
+    resultEl.textContent='BLITZ_CACHE_L2_CANARY='+JSON.stringify({schema:'zeibael.blitz.cache-l2-canary.v1',ok:false,error:String(e?.message||e),live_order_enabled:false});
+    return true;
+  }
+}
+async function autotest(){
+  const p=new URLSearchParams(location.search);if(p.get('autotest')!=='convex-max')return;
+  const ladder=[4,8,16,24,32,48,57],probe=window.zeibaelProbe(),runs=[];let stable=0;
+  try{
+    for(const requested of ladder){
+      status.textContent='BLITZ_'+requested;
+      const tasks=suite(Math.max(2,Math.ceil(requested/2))),t0=performance.now();let run;
+      try{run=await withTimeout(window.zeibaelRun({tasks,concurrency:requested}),30000)}
+      catch(e){runs.push({concurrency:requested,ok:false,timeout:String(e?.message||e)==='STEP_TIMEOUT',elapsed_ms:Math.round(performance.now()-t0),tasks:tasks.length});break}
+      const failed=run.results.filter(x=>!x.ok).length;
+      const step={concurrency:run.concurrency,requested_concurrency:requested,ok:run.ok&&failed===0,failed,elapsed_ms:Math.round(performance.now()-t0),tasks:tasks.length};
+      runs.push(step);
+      resultEl.textContent=JSON.stringify({probe,runs,stable_max:stable,requested_max:57,live_order_enabled:false,baseline_lock:'BO-ABSORPTION-1H-P1000-v1.0'},null,2);
+      if(!step.ok)break;
+      stable=run.concurrency;
+      await new Promise(r=>setTimeout(r,300))
+    }
+    status.textContent=stable===57?'BLITZ_MAX_57_PASS':'BLITZ_STABLE_'+stable;
+    resultEl.textContent=JSON.stringify({probe,runs,stable_max:stable,requested_max:57,cache:window.zeibaelProbe().l1_cache_entries,live_order_enabled:false,baseline_lock:'BO-ABSORPTION-1H-P1000-v1.0'},null,2)
+  }catch(e){status.textContent='AUTOTEST_ERROR';resultEl.textContent=String(e?.stack||e)}
+}
+(async()=>{
+  const p=new URLSearchParams(location.search);
+  if(p.get('autotest')){
+    if(await warmKernelAutotest())return;
+    if(await cacheL2Autotest())return;
+    await autotest();
+    return
+  }
+  status.textContent='READY_LAZY'
+})();
+</script></body>
