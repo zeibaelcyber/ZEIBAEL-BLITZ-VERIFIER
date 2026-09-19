@@ -713,114 +713,6 @@ window.zeibaelExportDigest=async({path='/',format='json'}={})=>{
   pushRuntimeEvent('export_digest',{path,format,bytes:raw.byteLength,sha256});
   return {ok:true,path,format,bytes:raw.byteLength,sha256}
 };
-window.zeibaelBenchmarkKernelLaunch=async({repeats=3}={})=>{
-  const count=Math.max(2,Math.min(4,Number(repeats)||3));
-  const rows=[];
-  const ms=t=>Math.round((performance.now()-t)*100)/100;
-  const median=xs=>{
-    const a=xs.map(Number).filter(Number.isFinite).sort((x,y)=>x-y);
-    if(!a.length)return null;
-    const m=Math.floor(a.length/2);
-    return a.length%2?a[m]:Math.round(((a[m-1]+a[m])/2)*100)/100
-  };
-  async function one(mode,tag){
-    await window.zeibaelResetRuntime();
-    const totalStarted=performance.now();
-    const bootStarted=performance.now();
-    const c=await boot();
-    const boot_ms=ms(bootStarted);
-    let prep_ms=0,spawn_ms=0,proc;
-    if(mode==='FILE_KERNEL'){
-      const root='/zeibael-kernel-launch-bench/'+tag;
-      const prepStarted=performance.now();
-      await c.fs.mkdir(root,{recursive:true});
-      await c.fs.writeFile(root+'/kernel.mjs',WARM_KERNEL_SOURCE);
-      prep_ms=ms(prepStarted);
-      const spawnStarted=performance.now();
-      proc=await c.spawn('node',['kernel.mjs'],{cwd:root});
-      spawn_ms=ms(spawnStarted)
-    }else if(mode==='INLINE_KERNEL'){
-      const spawnStarted=performance.now();
-      proc=await c.spawn('node',['--input-type=module','-e',WARM_KERNEL_SOURCE]);
-      spawn_ms=ms(spawnStarted)
-    }else throw new Error('KERNEL_LAUNCH_MODE_INVALID:'+mode);
-    const writer=proc.input.getWriter();
-    const reader=proc.output.getReader();
-    let buffer='',readyResolve,readyReject,responseResolve,responseReject;
-    const request_id='kernel-launch-'+tag+'-'+Date.now();
-    const readyP=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject});
-    const responseP=new Promise((resolve,reject)=>{responseResolve=resolve;responseReject=reject});
-    void (async()=>{
-      try{
-        for(;;){
-          const item=await reader.read();if(item.done)break;
-          buffer+=item.value;
-          for(;;){
-            const nl=buffer.indexOf('\n');if(nl<0)break;
-            const line=buffer.slice(0,nl).trim();buffer=buffer.slice(nl+1);
-            if(!line)continue;
-            if(line==='ZK1_READY'){readyResolve(true);continue}
-            if(line.startsWith('ZK1:')){
-              try{
-                const row=JSON.parse(line.slice(4));
-                if(row?.request_id===request_id)responseResolve(row)
-              }catch{}
-            }
-          }
-        }
-        readyReject(new Error('KERNEL_LAUNCH_STREAM_ENDED'));
-        responseReject(new Error('KERNEL_LAUNCH_STREAM_ENDED'))
-      }catch(e){readyReject(e);responseReject(e)}
-    })();
-    try{
-      const readyStarted=performance.now();
-      await Promise.race([readyP,new Promise((_,reject)=>setTimeout(()=>reject(new Error('KERNEL_LAUNCH_READY_TIMEOUT')),8000))]);
-      const ready_wait_ms=ms(readyStarted);
-      const taskStarted=performance.now();
-      await writer.write(JSON.stringify({request_id,id:'kernel-launch-'+tag,code:'console.log(42)',timeout_ms:2000})+'\n');
-      const result=await Promise.race([responseP,new Promise((_,reject)=>setTimeout(()=>reject(new Error('KERNEL_LAUNCH_TASK_TIMEOUT')),5000))]);
-      const first_task_ms=ms(taskStarted);
-      return {
-        mode,tag,ok:result?.ok===true&&String(result?.output||'').includes('42'),
-        boot_ms,prep_ms,spawn_ms,ready_wait_ms,first_task_ms,
-        worker_elapsed_ms:Number(result?.elapsed_ms)||null,
-        worker_mode:result?.worker_mode||null,
-        total_ms:ms(totalStarted)
-      }
-    }finally{
-      try{proc.kill()}catch{}
-    }
-  }
-  for(let i=0;i<count;i++){
-    const order=i%2===0?['FILE_KERNEL','INLINE_KERNEL']:['INLINE_KERNEL','FILE_KERNEL'];
-    for(const mode of order)rows.push(await one(mode,(i+1)+'-'+mode.toLowerCase()))
-  }
-  await window.zeibaelResetRuntime();
-  const file=rows.filter(x=>x.mode==='FILE_KERNEL');
-  const inline=rows.filter(x=>x.mode==='INLINE_KERNEL');
-  const evidence={
-    schema:'zeibael.blitz.kernel-launch-benchmark.v1',
-    ok:rows.length===count*2&&rows.every(x=>x.ok===true)&&file.length===count&&inline.length===count,
-    repeats:count,rows,
-    medians:{
-      file_total_ms:median(file.map(x=>x.total_ms)),
-      inline_total_ms:median(inline.map(x=>x.total_ms)),
-      file_boot_ms:median(file.map(x=>x.boot_ms)),
-      inline_boot_ms:median(inline.map(x=>x.boot_ms)),
-      file_prep_ms:median(file.map(x=>x.prep_ms)),
-      file_spawn_ms:median(file.map(x=>x.spawn_ms)),
-      inline_spawn_ms:median(inline.map(x=>x.spawn_ms)),
-      file_ready_wait_ms:median(file.map(x=>x.ready_wait_ms)),
-      inline_ready_wait_ms:median(inline.map(x=>x.ready_wait_ms)),
-      file_first_task_ms:median(file.map(x=>x.first_task_ms)),
-      inline_first_task_ms:median(inline.map(x=>x.first_task_ms))
-    },
-    canonical_state:'SUPABASE',
-    live_order_enabled:false
-  };
-  pushRuntimeEvent('kernel_launch_benchmark',{ok:evidence.ok,medians:evidence.medians,repeats:count});
-  return evidence
-};
 window.zeibaelBenchmarkColdSpawn=async({repeats=3}={})=>{
   const count=Math.max(2,Math.min(5,Number(repeats)||3));
   const c=await boot();
@@ -955,7 +847,7 @@ window.zeibaelBenchmarkColdProcessPrime=async({repeats=3}={})=>{
   pushRuntimeEvent('cold_process_prime_benchmark',{ok:evidence.ok,medians:evidence.medians,repeats:count});
   return evidence
 };
-window.zeibaelBenchmarkOverlapPrime=async({repeats=3}={})=>{
+window.zeibaelBenchmarkParallelColdPrime=async({repeats=3}={})=>{
   const count=Math.max(2,Math.min(4,Number(repeats)||3));
   const rows=[];
   const ms=t=>Math.round((performance.now()-t)*100)/100;
@@ -965,36 +857,35 @@ window.zeibaelBenchmarkOverlapPrime=async({repeats=3}={})=>{
     const m=Math.floor(a.length/2);
     return a.length%2?a[m]:Math.round(((a[m-1]+a[m])/2)*100)/100
   };
-  await snapshotSet('warm-kernel-v1',{'kernel.mjs':{file:{contents:WARM_KERNEL_SOURCE}}});
   async function cycle(mode,tag){
     await window.zeibaelResetRuntime();
     const totalStarted=performance.now();
-    const bootStarted=performance.now();
     const c=await boot();
-    const boot_ms=ms(bootStarted);
-    let prime_ms=0,kernel_ms=0,critical_ready_ms=0;
-    const readyStarted=performance.now();
-    if(mode==='OVERLAP_PRIME'){
-      const kernelStarted=performance.now();
-      const kernelP=ensureKernel(c).then(x=>{kernel_ms=ms(kernelStarted);return x});
+    let primePromise=null;
+    if(mode==='PARALLEL_PRIME'){
       const primeStarted=performance.now();
-      const primeP=(async()=>{
+      primePromise=(async()=>{
         const p=await c.spawn('node',['-e','process.exit(0)']);
         await collect(p);
-        const code=await p.exit;
-        prime_ms=ms(primeStarted);
-        if(code!==0)throw new Error('OVERLAP_PRIME_FAILED_'+code);
-      })();
-      await Promise.all([kernelP,primeP]);
-    }else if(mode==='NO_PRIME'){
-      const kernelStarted=performance.now();
-      await ensureKernel(c);
-      kernel_ms=ms(kernelStarted);
-    }else throw new Error('OVERLAP_PRIME_MODE_INVALID:'+mode);
-    critical_ready_ms=ms(readyStarted);
-    const root='/zeibael-overlap-prime/'+tag;
+        const exit=await p.exit;
+        return {exit,ms:ms(primeStarted)}
+      })()
+    }else if(mode!=='NO_PRIME')throw new Error('PARALLEL_PRIME_MODE_INVALID:'+mode);
+
+    const kernelStarted=performance.now();
+    await ensureKernel(c);
+    const kernel_ms=ms(kernelStarted);
+
+    let prime_ms=0;
+    if(primePromise){
+      const pr=await primePromise;
+      prime_ms=pr.ms;
+      if(pr.exit!==0)throw new Error('PARALLEL_PRIME_FAILED_'+pr.exit)
+    }
+
+    const root='/zeibael-parallel-prime-bench/'+tag;
     await c.fs.mkdir(root,{recursive:true});
-    await c.mount({'task.mjs':{file:{contents:'console.log("overlap-prime-ok")'}}},{mountPoint:root.startsWith('/')?root.slice(1):root});
+    await c.mount({'task.mjs':{file:{contents:'console.log("parallel-prime-ok")'}}},{mountPoint:root.startsWith('/')?root.slice(1):root});
     const taskStarted=performance.now();
     const spawnStarted=performance.now();
     const p=await c.spawn('node',['task.mjs'],{cwd:root});
@@ -1005,40 +896,42 @@ window.zeibaelBenchmarkOverlapPrime=async({repeats=3}={})=>{
     const process_ms=ms(processStarted);
     const task_ms=ms(taskStarted);
     try{await c.fs.rm(root,{recursive:true,force:true})}catch{}
-    return {
-      mode,tag,ok:exit===0,boot_ms,kernel_ms,prime_ms,critical_ready_ms,
-      spawn_ms,process_ms,task_ms,total_ms:ms(totalStarted),
-      output:String(output||'').trim().slice(-100)
-    }
+    return {mode,tag,ok:exit===0,kernel_ms,prime_ms,spawn_ms,process_ms,task_ms,total_ms:ms(totalStarted),output:String(output||'').trim().slice(-100)}
   }
   for(let i=0;i<count;i++){
-    const order=i%2===0?['NO_PRIME','OVERLAP_PRIME']:['OVERLAP_PRIME','NO_PRIME'];
+    const order=i%2===0?['NO_PRIME','PARALLEL_PRIME']:['PARALLEL_PRIME','NO_PRIME'];
     for(const mode of order)rows.push(await cycle(mode,(i+1)+'-'+mode.toLowerCase()))
   }
   await window.zeibaelResetRuntime();
-  const cleanup_ok=await snapshotDelete('warm-kernel-v1');
-  const noPrime=rows.filter(x=>x.mode==='NO_PRIME'),overlap=rows.filter(x=>x.mode==='OVERLAP_PRIME');
-  const evidence={
-    schema:'zeibael.blitz.overlap-process-prime-benchmark.v1',
-    ok:cleanup_ok===true&&rows.length===count*2&&rows.every(x=>x.ok===true)&&noPrime.length===count&&overlap.length===count,
-    repeats:count,cleanup_ok,rows,
-    medians:{
-      no_prime_total_ms:median(noPrime.map(x=>x.total_ms)),
-      overlap_total_ms:median(overlap.map(x=>x.total_ms)),
-      no_prime_kernel_ms:median(noPrime.map(x=>x.kernel_ms)),
-      overlap_kernel_ms:median(overlap.map(x=>x.kernel_ms)),
-      overlap_prime_ms:median(overlap.map(x=>x.prime_ms)),
-      no_prime_critical_ready_ms:median(noPrime.map(x=>x.critical_ready_ms)),
-      overlap_critical_ready_ms:median(overlap.map(x=>x.critical_ready_ms)),
-      no_prime_task_ms:median(noPrime.map(x=>x.task_ms)),
-      overlap_task_ms:median(overlap.map(x=>x.task_ms)),
-      no_prime_process_ms:median(noPrime.map(x=>x.process_ms)),
-      overlap_process_ms:median(overlap.map(x=>x.process_ms))
-    },
-    isolation:'DUMMY_PRIME_EXITS_BEFORE_REAL_TASK__REAL_TASK_STILL_FRESH_PROCESS',
-    canonical_state:'SUPABASE',live_order_enabled:false
+  const noPrime=rows.filter(x=>x.mode==='NO_PRIME'),parallel=rows.filter(x=>x.mode==='PARALLEL_PRIME');
+  const medians={
+    no_prime_total_ms:median(noPrime.map(x=>x.total_ms)),
+    parallel_prime_total_ms:median(parallel.map(x=>x.total_ms)),
+    no_prime_kernel_ms:median(noPrime.map(x=>x.kernel_ms)),
+    parallel_prime_kernel_ms:median(parallel.map(x=>x.kernel_ms)),
+    parallel_prime_cost_ms:median(parallel.map(x=>x.prime_ms)),
+    no_prime_task_ms:median(noPrime.map(x=>x.task_ms)),
+    parallel_prime_task_ms:median(parallel.map(x=>x.task_ms)),
+    no_prime_process_ms:median(noPrime.map(x=>x.process_ms)),
+    parallel_prime_process_ms:median(parallel.map(x=>x.process_ms)),
+    no_prime_spawn_ms:median(noPrime.map(x=>x.spawn_ms)),
+    parallel_prime_spawn_ms:median(parallel.map(x=>x.spawn_ms))
   };
-  pushRuntimeEvent('overlap_process_prime_benchmark',{ok:evidence.ok,medians:evidence.medians,repeats:count});
+  const improvement_ratio=Number.isFinite(medians.no_prime_total_ms)&&medians.no_prime_total_ms>0
+    ? Math.round((1-(medians.parallel_prime_total_ms/medians.no_prime_total_ms))*10000)/10000
+    : null;
+  const selected=(improvement_ratio!==null&&improvement_ratio>=0.10&&medians.parallel_prime_kernel_ms<=medians.no_prime_kernel_ms*1.10)
+    ? 'PARALLEL_PRIME':'NO_PRIME';
+  const evidence={
+    schema:'zeibael.blitz.parallel-cold-prime-benchmark.v1',
+    ok:rows.length===count*2&&rows.every(x=>x.ok===true)&&noPrime.length===count&&parallel.length===count,
+    repeats:count,rows,medians,improvement_ratio,selected,
+    promotion_threshold_ratio:0.10,
+    kernel_regression_ceiling_ratio:1.10,
+    canonical_state:'SUPABASE',live_order_enabled:false,
+    isolation:'PRIME_PROCESS_EXITS_BEFORE_COLD_TASK__PRIME_OVERLAPS_KERNEL_BOOT'
+  };
+  pushRuntimeEvent('parallel_cold_prime_benchmark',{ok:evidence.ok,medians,improvement_ratio,selected});
   return evidence
 };
 window.zeibaelRunEnvelope=async(envelope)=>{
