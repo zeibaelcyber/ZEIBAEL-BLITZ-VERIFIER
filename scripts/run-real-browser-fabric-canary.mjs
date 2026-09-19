@@ -85,9 +85,39 @@ function connectCdp(wsUrl) {
 
 async function browserCanary() {
   const wait = ms => new Promise(r => setTimeout(r, ms));
+  async function idbSanity(){
+    return await new Promise(resolve=>{
+      try{
+        const req=indexedDB.open("ZEIBAEL_BLITZ_FREE_FABRIC_V1",1);
+        req.onupgradeneeded=()=>resolve({ok:false,error:"unexpected_upgrade",stores:[...req.result.objectStoreNames]});
+        req.onerror=()=>resolve({ok:false,error:String(req.error?.message||req.error||"open_error")});
+        req.onblocked=()=>resolve({ok:false,error:"blocked"});
+        req.onsuccess=()=>{
+          const db=req.result;
+          const stores=[...db.objectStoreNames];
+          if(!stores.includes("results")){resolve({ok:false,error:"results_store_missing",stores});return}
+          try{
+            const tx=db.transaction("results","readwrite"),store=tx.objectStore("results");
+            const key="canary:idb:"+Date.now();
+            store.put({key,stored_at:Date.now(),kind:"CANARY"});
+            tx.oncomplete=()=>{
+              try{
+                const tx2=db.transaction("results","readonly"),r=tx2.objectStore("results").get(key);
+                r.onsuccess=()=>resolve({ok:Boolean(r.result),stores,readback:r.result?.kind||null});
+                r.onerror=()=>resolve({ok:false,error:String(r.error?.message||r.error||"read_error"),stores})
+              }catch(e){resolve({ok:false,error:String(e?.message||e),stores})}
+            };
+            tx.onerror=()=>resolve({ok:false,error:String(tx.error?.message||tx.error||"write_error"),stores});
+            tx.onabort=()=>resolve({ok:false,error:String(tx.error?.message||tx.error||"write_abort"),stores})
+          }catch(e){resolve({ok:false,error:String(e?.message||e),stores})}
+        }
+      }catch(e){resolve({ok:false,error:String(e?.message||e)})}
+    })
+  }
   let stage = "initial";
   try {
     const initial = window.zeibaelProbe();
+    const idb = await idbSanity();
     stage = "watch";
     const watchStart = await window.zeibaelWatch({ path: "/zeibael-watch", recursive: true });
 
@@ -108,6 +138,7 @@ async function browserCanary() {
     concurrency: 1,
   });
   const afterFirst = window.zeibaelProbe();
+  const eventsAfterFirst = window.zeibaelEvents().slice(-32);
 
   stage = "broker";
   const broker = await window.zeibaelRunEnvelope({
@@ -162,9 +193,11 @@ async function browserCanary() {
     concurrency: 1,
   });
   const afterSecond = window.zeibaelProbe();
+  const eventsAfterSecond = window.zeibaelEvents().slice(-32);
 
   const ok =
     initial.max_concurrency === 57 &&
+    idb.ok === true &&
     watchStart?.ok === true &&
     writeRun?.ok === true &&
     watchEvents.length >= 1 &&
@@ -185,12 +218,14 @@ async function browserCanary() {
     ok,
     stage: "complete",
     probe: initial,
-    snapshot: { after_first: afterFirst, after_second: afterSecond },
+    idb_sanity: idb,
+    snapshot: { after_first: afterFirst, after_second: afterSecond, events_after_first: eventsAfterFirst, events_after_second: eventsAfterSecond },
     watch: {
       ok: watchStart?.ok === true && watchEvents.length >= 1,
       fs_change_events: watchEvents.length,
       latest: watchEvents.slice(-8),
       write_run_ok: writeRun?.ok === true,
+      write_run: writeRun,
     },
     export_digest: exportDigest,
     broker,
