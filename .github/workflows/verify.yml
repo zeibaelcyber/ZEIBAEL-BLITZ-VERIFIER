@@ -21,3 +21,5 @@ jobs:
         run: curl -sS https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-blitz-health || true
       - name: Run ZEIBAEL verifier
         run: npm test
+      - name: Enforce Blitz runtime invariants
+        run: node scripts/blitz-invariants.mjs
