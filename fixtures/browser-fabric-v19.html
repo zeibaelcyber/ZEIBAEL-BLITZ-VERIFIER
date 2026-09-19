@@ -382,7 +382,8 @@ async function primeColdProcess(){
       coldProcessPrimeProc=proc;
       const output=await collect(proc);
       const exit=await proc.exit;
-      const pid=Number(String(output||'').trim().split(/\s+/).pop())||null;
+      const pidText=String(output||'').replace(/\x1b\[[0-9;]*m/g,'').trim();
+      const pid=Number((pidText.match(/\d+/)||[])[0])||null;
       if(generation!==coldProcessPrimeGeneration)return coldProcessPrimeStats;
       coldProcessPrimeStats={
         ok:exit===0,
