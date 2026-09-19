@@ -1,0 +1,17 @@
+name: Fabric v17 syntax gate
+on:
+  push:
+    branches: [fabric-v17-syntax-check-20260919]
+permissions:
+  contents: read
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Node syntax check
+        run: node --check scratch/edge-v17-module.mjs
