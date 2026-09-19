@@ -151,14 +151,14 @@ async function hydrateKernelFiles(c,root){
     catch(e){pushRuntimeEvent('snapshot_parse_failed',{key,message:String(e?.message||e)})}
   }
   if(snapTree){
-    try{const mountPoint=root.replace(/^\\/+/, '');await c.mount(snapTree,{mountPoint});snapshotHits++;pushRuntimeEvent('snapshot_hit',{key});return {source:'SNAPSHOT'}}
+    try{const mountPoint=root.replace(/^\/+/, '');await c.mount(snapTree,{mountPoint});snapshotHits++;pushRuntimeEvent('snapshot_hit',{key});return {source:'SNAPSHOT'}}
     catch(e){pushRuntimeEvent('snapshot_mount_failed',{message:String(e?.message||e)})}
   }
   snapshotMisses++;
   await c.fs.mkdir(root,{recursive:true});
   await c.fs.writeFile(root+'/kernel.mjs',WARM_KERNEL_SOURCE);
   try{
-    const exportPath=root.replace(/^\\/+/, ''); const tree=await c.export(exportPath,{format:'json'});
+    const exportPath=root.replace(/^\/+/, ''); const tree=await c.export(exportPath,{format:'json'});
     if(await snapshotSet(key,tree)){snapshotWrites++;pushRuntimeEvent('snapshot_write',{key})}
   }catch(e){pushRuntimeEvent('snapshot_export_failed',{message:String(e?.message||e)})}
   return {source:'SOURCE_WRITE'}
