@@ -4,11 +4,22 @@ window.zeibaelProbe=()=>({coi:self.crossOriginIsolated,sab:typeof SharedArrayBuf
 </script><script type="module">
 const status=document.getElementById('status'),resultEl=document.getElementById('result');
 let WebContainer=null,webcontainerImportError=null;
-for(const url of ['https://esm.sh/@webcontainer/api@1.6.4','https://cdn.jsdelivr.net/npm/@webcontainer/api@1.6.4/+esm']){
+async function importWithTimeout(url,ms=8000){
+  let timer;
   try{
-    const mod=await import(url);
+    return await Promise.race([
+      import(url),
+      new Promise((_,reject)=>timer=setTimeout(()=>reject(new Error('IMPORT_TIMEOUT:'+url)),ms))
+    ])
+  }finally{clearTimeout(timer)}
+}
+let importAttempt=0;
+for(const url of ['https://esm.sh/@webcontainer/api@1.6.4','https://cdn.jsdelivr.net/npm/@webcontainer/api@1.6.4/+esm']){
+  importAttempt++;status.textContent='IMPORTING_'+importAttempt;
+  try{
+    const mod=await importWithTimeout(url);
     if(typeof mod?.WebContainer==='function'){WebContainer=mod.WebContainer;break}
-  }catch(e){webcontainerImportError=String(e?.message||e);status.textContent='IMPORT_RETRY'}
+  }catch(e){webcontainerImportError=String(e?.message||e);status.textContent='IMPORT_RETRY_'+importAttempt}
 }
 if(!WebContainer){status.textContent='IMPORT_ERROR';throw new Error('WEBCONTAINER_API_IMPORT_FAILED:'+String(webcontainerImportError||'unknown'))}
 const MAX_CONCURRENCY=57,MAX_TASKS=512,MAX_CODE_BYTES=65536,DEFAULT_CACHE_TTL_MS=600000,MAX_CACHE_TTL_MS=86400000,MAX_CACHE_ENTRIES=1024,IDB_NAME='ZEIBAEL_BLITZ_FREE_FABRIC_V1',IDB_STORE='results',SNAPSHOT_DB='ZEIBAEL_BLITZ_GOLDEN_SNAPSHOT_V1',SNAPSHOT_STORE='snapshots';
