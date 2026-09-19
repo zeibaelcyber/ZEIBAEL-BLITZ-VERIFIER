@@ -155,6 +155,14 @@ async function hydrateKernelFiles(c,root){
   if(snapTree){
     try{
       const mountPoint=(root.startsWith('/')?root.slice(1):root);
+      pushRuntimeEvent('snapshot_tree_keys',{
+        phase:'hit',
+        key,
+        root,
+        mount_point:mountPoint,
+        top_keys:Object.keys(snapTree||{}).slice(0,12),
+        top_shapes:Object.fromEntries(Object.entries(snapTree||{}).slice(0,12).map(([k,v])=>[k,v&&typeof v==='object'?Object.keys(v).slice(0,6):typeof v]))
+      });
       await c.mount(snapTree,{mountPoint});
       let repaired=false;
       try{
@@ -175,6 +183,14 @@ async function hydrateKernelFiles(c,root){
   await c.fs.writeFile(root+'/kernel.mjs',WARM_KERNEL_SOURCE);
   try{
     const exportPath=(root.startsWith('/')?root.slice(1):root); const tree=await c.export(exportPath,{format:'json'});
+    pushRuntimeEvent('snapshot_tree_keys',{
+      phase:'write',
+      key,
+      root,
+      export_path:exportPath,
+      top_keys:Object.keys(tree||{}).slice(0,12),
+      top_shapes:Object.fromEntries(Object.entries(tree||{}).slice(0,12).map(([k,v])=>[k,v&&typeof v==='object'?Object.keys(v).slice(0,6):typeof v]))
+    });
     if(await snapshotSet(key,tree)){snapshotWrites++;pushRuntimeEvent('snapshot_write',{key})}
   }catch(e){pushRuntimeEvent('snapshot_export_failed',{message:String(e?.message||e)})}
   return {source:'SOURCE_WRITE'}
