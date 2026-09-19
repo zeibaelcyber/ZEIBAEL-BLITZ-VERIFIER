@@ -2,7 +2,14 @@
 const status=document.getElementById('status'),resultEl=document.getElementById('result');
 window.zeibaelProbe=()=>({coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,hardwareConcurrency:navigator.hardwareConcurrency||null,deviceMemory:navigator.deviceMemory||null,ua:navigator.userAgent,status:status.textContent});
 </script><script type="module">
-import { WebContainer } from 'https://esm.sh/@webcontainer/api@1.6.4';
+let WebContainer=null,webcontainerImportError=null;
+for(const url of ['https://esm.sh/@webcontainer/api@1.6.4','https://cdn.jsdelivr.net/npm/@webcontainer/api@1.6.4/+esm']){
+  try{
+    const mod=await import(url);
+    if(typeof mod?.WebContainer==='function'){WebContainer=mod.WebContainer;break}
+  }catch(e){webcontainerImportError=String(e?.message||e);status.textContent='IMPORT_RETRY'}
+}
+if(!WebContainer){status.textContent='IMPORT_ERROR';throw new Error('WEBCONTAINER_API_IMPORT_FAILED:'+String(webcontainerImportError||'unknown'))}
 const status=document.getElementById('status'),resultEl=document.getElementById('result');
 const MAX_CONCURRENCY=57,MAX_TASKS=512,MAX_CODE_BYTES=65536,DEFAULT_CACHE_TTL_MS=600000,MAX_CACHE_TTL_MS=86400000,MAX_CACHE_ENTRIES=1024,IDB_NAME='ZEIBAEL_BLITZ_FREE_FABRIC_V1',IDB_STORE='results',SNAPSHOT_DB='ZEIBAEL_BLITZ_GOLDEN_SNAPSHOT_V1',SNAPSHOT_STORE='snapshots';
 let wc=null,bootPromise=null,runSeq=0;
