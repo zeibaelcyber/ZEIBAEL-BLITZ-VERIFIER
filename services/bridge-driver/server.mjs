@@ -3,7 +3,11 @@ import { spawn } from 'node:child_process';
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = '0.0.0.0';
-const MAX_TASKS = 512;
+const HARD_TASK_CEILING = 4096;
+const PROVEN_WORKER_CEILING = 1791;
+const DEFAULT_MAX_CONCURRENCY = 57;
+const MAX_TASKS = Math.max(1, Math.min(HARD_TASK_CEILING, Number(process.env.ZEIBAEL_MAX_TASKS) || HARD_TASK_CEILING));
+const MAX_CONCURRENCY = Math.max(1, Math.min(PROVEN_WORKER_CEILING, Number(process.env.ZEIBAEL_MAX_CONCURRENCY) || DEFAULT_MAX_CONCURRENCY));
 const MAX_CODE_BYTES = 12 * 1024;
 const MAX_TOTAL_CODE_BYTES = 256 * 1024;
 const MAX_BODY_BYTES = 512 * 1024;
@@ -74,7 +78,7 @@ function safeId(value, fallback) {
 function normalizeTasks(body) {
   const tasks = Array.isArray(body?.tasks) ? body.tasks : [];
   if (tasks.length < 1 || tasks.length > MAX_TASKS) {
-    throw new Error('TASK_COUNT_1_TO_512_REQUIRED');
+    throw new Error('TASK_COUNT_1_TO_'+MAX_TASKS+'_REQUIRED');
   }
 
   let total = 0;
@@ -92,8 +96,8 @@ function normalizeTasks(body) {
 
 function clampConcurrency(value, taskCount) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return taskCount;
-  return Math.max(1, Math.min(taskCount, Math.floor(n), MAX_TASKS));
+  if (!Number.isFinite(n)) return Math.min(taskCount, MAX_CONCURRENCY);
+  return Math.max(1, Math.min(taskCount, Math.floor(n), MAX_CONCURRENCY));
 }
 
 function truncateBuffer(buffer) {
@@ -198,6 +202,9 @@ const server = http.createServer(async (req, res) => {
       mode: 'RESEARCH_VALIDATION',
       live_order_enabled: false,
       max_tasks: MAX_TASKS,
+      max_concurrency: MAX_CONCURRENCY,
+      proven_worker_ceiling: PROVEN_WORKER_CEILING,
+      adaptive_concurrency: true,
       max_code_bytes: MAX_CODE_BYTES,
       max_total_code_bytes: MAX_TOTAL_CODE_BYTES
     });
@@ -222,7 +229,9 @@ const server = http.createServer(async (req, res) => {
       live_order_enabled: false,
       zero_spend_required: true,
       requested_tasks: tasks.length,
+      requested_concurrency: Number(body?.concurrency) || null,
       actual_concurrency: concurrency,
+      max_concurrency: MAX_CONCURRENCY,
       compute_elapsed_ms: Date.now() - started,
       results
     });
