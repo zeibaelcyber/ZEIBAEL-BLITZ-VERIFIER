@@ -14,6 +14,7 @@ try{
  const broker=await fetch("http://127.0.0.1:"+port+"/burst",{method:"POST",headers:{authorization:"Bearer "+token,"content-type":"application/json"},body:JSON.stringify({route:{execution_class:"CONNECTOR_BROKERED",broker_required:true},tasks:[{id:"x",code:'console.log(1)',kernel_safe:true}]})}).then(r=>r.json());
  const h2=await fetch("http://127.0.0.1:"+port+"/health").then(r=>r.json());
  const ok=h1.ready&&first.status===200&&first.body.ok&&second.body.ok&&second.body.cache.hits===2&&h1.kernel_pid===h2.kernel_pid&&broker.status==="BROKER_REQUIRED"&&broker.executed===false;
- console.log("BLITZ_WARM_RUNNER_SELFTEST="+JSON.stringify({schema:"zeibael.blitz.warm-runner-selftest.v2",ok,kernel_pid:h1.kernel_pid,pid_reused:h1.kernel_pid===h2.kernel_pid,first:first.body,second:second.body,broker,health:h2,live_order_enabled:false}));
- process.exitCode=ok?0:1;
+ const payload={schema:"zeibael.blitz.warm-runner-selftest.v2",ok,kernel_pid:h1.kernel_pid,pid_reused:h1.kernel_pid===h2.kernel_pid,first:first.body,second:second.body,broker,health:h2,live_order_enabled:false};
+ emit(payload,ok?0:1);
+ process.exitCode=finalExitCode;
 }catch(e){emit({schema:"zeibael.blitz.warm-runner-selftest.v2",ok:false,error:String(e?.stack||e),logs,live_order_enabled:false},1)}finally{try{child.kill("SIGKILL")}catch{};setTimeout(()=>process.exit(finalExitCode),100)}
