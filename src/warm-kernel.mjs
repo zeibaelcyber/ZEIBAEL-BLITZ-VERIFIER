@@ -88,8 +88,8 @@ async function execute(req){
     const finish=(ok,exitCode,error)=>{
       if(done)return;done=true;clearTimeout(timer);
       const elapsed=Math.round(performance.now()-started);
-      setImmediate(async()=>{
-        try{await worker.terminate()}catch{}
+      setImmediate(()=>{
+        try{void worker.terminate().catch(()=>{})}catch{}
         resolve({
           request_id:req.request_id,id:req.id,ok,exit_code:exitCode,elapsed_ms:elapsed,
           output:trim(out+(err?((out?"\n":"")+err):"")),
