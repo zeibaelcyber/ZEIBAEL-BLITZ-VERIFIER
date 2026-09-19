@@ -18,7 +18,12 @@ const executionRank = new Map(compiled.executionOrder.map((id, index) => [id, in
 const state = new Map();
 const startedAt = Date.now();
 const WORKER_THREAD_CEILING_REFERENCE = 1791;
-const WEBCONTAINER_SAFE_PARALLEL_SLOTS = 57;
+const DEFAULT_WEBCONTAINER_SAFE_PARALLEL_SLOTS = 57;
+const configuredConcurrencyCap = Number(process.env.ZEIBAEL_MAX_CONCURRENCY || DEFAULT_WEBCONTAINER_SAFE_PARALLEL_SLOTS);
+const WEBCONTAINER_SAFE_PARALLEL_SLOTS =
+  Number.isFinite(configuredConcurrencyCap) && configuredConcurrencyCap >= 1
+    ? Math.min(WORKER_THREAD_CEILING_REFERENCE, Math.floor(configuredConcurrencyCap))
+    : DEFAULT_WEBCONTAINER_SAFE_PARALLEL_SLOTS;
 const DEFAULT_CACHE_TTL_MS = 10 * 60 * 1000;
 const requestedConcurrency = Number(packet.max_concurrency ?? packet.concurrency ?? jobs.length);
 const maxConcurrency =
@@ -171,12 +176,13 @@ function depsTerminal(job) {
 
 const pending = new Set(jobs.map(j => j.id));
 const running = new Map();
+const readyOrder = jobs.map(j => j.id).sort((a, b) => (executionRank.get(a) ?? 999999) - (executionRank.get(b) ?? 999999));
 
 while (pending.size || running.size) {
   let launched = 0;
 
-  const readyOrder = [...pending].sort((a, b) => (executionRank.get(a) ?? 999999) - (executionRank.get(b) ?? 999999));
   for (const id of readyOrder) {
+    if (!pending.has(id)) continue;
     if (running.size >= maxConcurrency) break;
     const job = byId.get(id);
     if (depsSatisfied(job)) {
@@ -242,6 +248,7 @@ const output = {
   max_concurrency: maxConcurrency,
   worker_thread_ceiling_reference: WORKER_THREAD_CEILING_REFERENCE,
   webcontainer_safe_parallel_slots: WEBCONTAINER_SAFE_PARALLEL_SLOTS,
+  adaptive_concurrency_cap: true,
   cache: {
     enabled: true,
     policy: 'EXPLICIT_CACHE_SAFE_ONLY',
