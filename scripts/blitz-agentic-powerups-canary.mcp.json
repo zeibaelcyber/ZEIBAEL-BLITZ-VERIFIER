@@ -1,0 +1,35 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "--yes",
+        "@modelcontextprotocol/server-filesystem@2026.8.31",
+        "."
+      ]
+    },
+    "shell": {
+      "command": "bash",
+      "args": [
+        "scripts/blitz-agentic-shell-canary.sh"
+      ]
+    },
+    "codegraph": {
+      "command": "npx",
+      "args": [
+        "--yes",
+        "@sdsrs/code-graph@0.153.0"
+      ],
+      "env": {
+        "CODE_GRAPH_NO_AUTO_UPDATE": "1",
+        "CODE_GRAPH_DISABLE_MODEL_DOWNLOAD": "1"
+      }
+    },
+    "zenith": {
+      "command": "bash",
+      "args": [
+        "scripts/run_zenith_safe_mcp.sh"
+      ]
+    }
+  }
+}
