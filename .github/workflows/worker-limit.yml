@@ -6,6 +6,9 @@ on:
       - '.github/workflows/worker-limit.yml'
       - 'src/worker-limit.mjs'
   workflow_dispatch:
+concurrency:
+  group: zeibael-direct-worker-maximum
+  cancel-in-progress: true
 jobs:
   worker-limit:
     runs-on: ubuntu-24.04
