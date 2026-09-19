@@ -85,24 +85,31 @@ function connectCdp(wsUrl) {
 
 async function browserCanary() {
   const wait = ms => new Promise(r => setTimeout(r, ms));
-  const initial = window.zeibaelProbe();
-  const watchStart = await window.zeibaelWatch({ path: "/zeibael-fabric", recursive: true });
+  let stage = "initial";
+  try {
+    const initial = window.zeibaelProbe();
+    stage = "watch";
+    const watchStart = await window.zeibaelWatch({ path: "/", recursive: true });
 
-  const fsCode = 'import fs from "node:fs/promises"; await fs.mkdir("/zeibael-fabric",{recursive:true}); await fs.writeFile("/zeibael-fabric/canary.txt","v1"); console.log("written")';
+  stage = "cold-run";
+  const fsCode = 'console.log("watch-trigger")';
   const writeRun = await window.zeibaelRun({
     tasks: [{ id: "fs-write", code: fsCode, cache_safe: false, kernel_safe: false }],
     concurrency: 1,
   });
   await wait(500);
   const watchEvents = window.zeibaelEvents().filter(x => x && x.type === "fs_change");
-  const exportDigest = await window.zeibaelExportDigest({ path: "/zeibael-fabric", format: "json" });
+  stage = "export-digest";
+  const exportDigest = await window.zeibaelExportDigest({ path: "/", format: "json" });
 
+  stage = "snapshot-first";
   const first = await window.zeibaelRun({
     tasks: [{ id: "snapshot-first", code: "console.log(21*2)", cache_safe: false, kernel_safe: true }],
     concurrency: 1,
   });
   const afterFirst = window.zeibaelProbe();
 
+  stage = "broker";
   const broker = await window.zeibaelRunEnvelope({
     schema: "zeibael.blitz.route.v2",
     provider_key: "linear",
@@ -145,9 +152,11 @@ async function browserCanary() {
     credentialExposureRejected = String(e?.message || e).includes("credential_exposure_forbidden");
   }
 
+  stage = "reset";
   window.zeibaelStopWatch();
   await window.zeibaelResetRuntime();
 
+  stage = "snapshot-second";
   const second = await window.zeibaelRun({
     tasks: [{ id: "snapshot-second", code: "console.log(6*7)", cache_safe: false, kernel_safe: true }],
     concurrency: 1,
@@ -174,6 +183,7 @@ async function browserCanary() {
 
   return {
     ok,
+    stage: "complete",
     probe: initial,
     snapshot: { after_first: afterFirst, after_second: afterSecond },
     watch: {
@@ -189,6 +199,9 @@ async function browserCanary() {
     first_run_ok: first?.ok === true,
     second_run_ok: second?.ok === true,
   };
+  } catch (e) {
+    throw new Error("BROWSER_FABRIC_STAGE_" + stage + ":" + String(e?.message || e));
+  }
 }
 
 await mkdir("evidence", { recursive: true });
