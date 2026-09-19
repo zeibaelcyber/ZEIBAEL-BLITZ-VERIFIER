@@ -202,4 +202,21 @@ const output = {
 };
 
 process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+const sentinel = {
+  schema: 'ZEIBAEL_SMART_ONE_SHOT_SENTINEL_V1',
+  task_id: output.task_id,
+  input_jobs_total: output.input_jobs_total,
+  executable_jobs_total: output.jobs_total,
+  duplicates_removed: output.duplicates_removed,
+  pass: output.pass,
+  failed: output.failed,
+  blocked: output.blocked,
+  dependency_graph_validated: output.dependency_graph_validated,
+  critical_path_scheduling: output.critical_path_scheduling,
+  max_concurrency: output.max_concurrency,
+  worker_thread_ceiling_reference: output.worker_thread_ceiling_reference,
+  webcontainer_safe_parallel_slots: output.webcontainer_safe_parallel_slots,
+  live_order_enabled: false
+};
+process.stdout.write('ZEIBAEL_SMART_ONE_SHOT=' + JSON.stringify(sentinel) + '\n');
 if (output.failed || output.blocked) process.exitCode = 1;
