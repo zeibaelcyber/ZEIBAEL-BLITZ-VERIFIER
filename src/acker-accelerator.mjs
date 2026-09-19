@@ -29,7 +29,7 @@ const WORKLOAD_CAPS = Object.freeze({
   LIGHT: 17,
   IO: 23,
   BUILD_TEST: 25,
-  CPU_HEAVY: 32
+  CPU_HEAVY: 39
 });
 function workloadProfile(job) {
   const explicit = String(job?.workload_profile || packet?.workload_profile || '').toUpperCase();
