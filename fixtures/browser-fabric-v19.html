@@ -775,6 +775,78 @@ window.zeibaelBenchmarkColdSpawn=async({repeats=3}={})=>{
   pushRuntimeEvent('cold_spawn_benchmark',{ok:evidence.ok,medians:evidence.medians,repeats:count});
   return evidence
 };
+window.zeibaelBenchmarkColdProcessPrime=async({repeats=3}={})=>{
+  const count=Math.max(2,Math.min(4,Number(repeats)||3));
+  const rows=[];
+  const ms=t=>Math.round((performance.now()-t)*100)/100;
+  const median=xs=>{
+    const a=xs.filter(Number.isFinite).sort((x,y)=>x-y);
+    if(!a.length)return null;
+    const m=Math.floor(a.length/2);
+    return a.length%2?a[m]:(a[m-1]+a[m])/2
+  };
+  await snapshotSet('warm-kernel-v1',{'kernel.mjs':{file:{contents:WARM_KERNEL_SOURCE}}});
+  async function cycle(mode,tag){
+    await window.zeibaelResetRuntime();
+    const c=await boot();
+    const kernelStarted=performance.now();
+    await ensureKernel(c);
+    const kernel_ms=ms(kernelStarted);
+    let prime_ms=0;
+    if(mode==='PRIME_FIRST'){
+      const primeStarted=performance.now();
+      const prime=await c.spawn('node',['-e','process.exit(0)']);
+      await collect(prime);
+      const primeExit=await prime.exit;
+      prime_ms=ms(primeStarted);
+      if(primeExit!==0)throw new Error('COLD_PROCESS_PRIME_FAILED_'+primeExit)
+    }
+    const root='/zeibael-cold-prime-bench/'+tag;
+    await c.fs.mkdir(root,{recursive:true});
+    await c.mount({'task.mjs':{file:{contents:'console.log("cold-prime-ok")'}}},{mountPoint:root.startsWith('/')?root.slice(1):root});
+    const taskStarted=performance.now();
+    const spawnStarted=performance.now();
+    const p=await c.spawn('node',['task.mjs'],{cwd:root});
+    const spawn_ms=ms(spawnStarted);
+    const processStarted=performance.now();
+    const output=await collect(p);
+    const exit=await p.exit;
+    const process_ms=ms(processStarted);
+    const task_ms=ms(taskStarted);
+    try{await c.fs.rm(root,{recursive:true,force:true})}catch{}
+    return {mode,tag,ok:exit===0,kernel_ms,prime_ms,spawn_ms,process_ms,task_ms,output:String(output||'').trim().slice(-100)}
+  }
+  for(let i=0;i<count;i++){
+    const order=i%2===0?['NO_PRIME','PRIME_FIRST']:['PRIME_FIRST','NO_PRIME'];
+    for(const mode of order)rows.push(await cycle(mode,(i+1)+'-'+mode.toLowerCase()))
+  }
+  await window.zeibaelResetRuntime();
+  const cleanup_ok=await snapshotDelete('warm-kernel-v1');
+  const noPrime=rows.filter(x=>x.mode==='NO_PRIME'),prime=rows.filter(x=>x.mode==='PRIME_FIRST');
+  const evidence={
+    schema:'zeibael.blitz.cold-process-prime-benchmark.v1',
+    ok:cleanup_ok===true&&rows.length===count*2&&rows.every(x=>x.ok===true)&&noPrime.length===count&&prime.length===count,
+    repeats:count,
+    cleanup_ok,
+    rows,
+    medians:{
+      no_prime_kernel_ms:median(noPrime.map(x=>x.kernel_ms)),
+      prime_kernel_ms:median(prime.map(x=>x.kernel_ms)),
+      prime_cost_ms:median(prime.map(x=>x.prime_ms)),
+      no_prime_task_ms:median(noPrime.map(x=>x.task_ms)),
+      primed_task_ms:median(prime.map(x=>x.task_ms)),
+      no_prime_process_ms:median(noPrime.map(x=>x.process_ms)),
+      primed_process_ms:median(prime.map(x=>x.process_ms)),
+      no_prime_spawn_ms:median(noPrime.map(x=>x.spawn_ms)),
+      primed_spawn_ms:median(prime.map(x=>x.spawn_ms))
+    },
+    canonical_state:'SUPABASE',
+    live_order_enabled:false,
+    isolation:'DUMMY_PROCESS_EXITS_BEFORE_TASK__TASK_STILL_ONE_PROCESS_PER_TASK'
+  };
+  pushRuntimeEvent('cold_process_prime_benchmark',{ok:evidence.ok,medians:evidence.medians,repeats:count});
+  return evidence
+};
 window.zeibaelRunEnvelope=async(envelope)=>{
   if(!envelope||envelope.schema!=='zeibael.blitz.route.v2')throw new Error('invalid_route_schema');
   if(envelope.live_order_enabled===true)throw new Error('live_order_forbidden');
