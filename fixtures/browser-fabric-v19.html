@@ -955,6 +955,92 @@ window.zeibaelBenchmarkColdProcessPrime=async({repeats=3}={})=>{
   pushRuntimeEvent('cold_process_prime_benchmark',{ok:evidence.ok,medians:evidence.medians,repeats:count});
   return evidence
 };
+window.zeibaelBenchmarkOverlapPrime=async({repeats=3}={})=>{
+  const count=Math.max(2,Math.min(4,Number(repeats)||3));
+  const rows=[];
+  const ms=t=>Math.round((performance.now()-t)*100)/100;
+  const median=xs=>{
+    const a=xs.map(Number).filter(Number.isFinite).sort((x,y)=>x-y);
+    if(!a.length)return null;
+    const m=Math.floor(a.length/2);
+    return a.length%2?a[m]:Math.round(((a[m-1]+a[m])/2)*100)/100
+  };
+  await snapshotSet('warm-kernel-v1',{'kernel.mjs':{file:{contents:WARM_KERNEL_SOURCE}}});
+  async function cycle(mode,tag){
+    await window.zeibaelResetRuntime();
+    const totalStarted=performance.now();
+    const bootStarted=performance.now();
+    const c=await boot();
+    const boot_ms=ms(bootStarted);
+    let prime_ms=0,kernel_ms=0,critical_ready_ms=0;
+    const readyStarted=performance.now();
+    if(mode==='OVERLAP_PRIME'){
+      const kernelStarted=performance.now();
+      const kernelP=ensureKernel(c).then(x=>{kernel_ms=ms(kernelStarted);return x});
+      const primeStarted=performance.now();
+      const primeP=(async()=>{
+        const p=await c.spawn('node',['-e','process.exit(0)']);
+        await collect(p);
+        const code=await p.exit;
+        prime_ms=ms(primeStarted);
+        if(code!==0)throw new Error('OVERLAP_PRIME_FAILED_'+code);
+      })();
+      await Promise.all([kernelP,primeP]);
+    }else if(mode==='NO_PRIME'){
+      const kernelStarted=performance.now();
+      await ensureKernel(c);
+      kernel_ms=ms(kernelStarted);
+    }else throw new Error('OVERLAP_PRIME_MODE_INVALID:'+mode);
+    critical_ready_ms=ms(readyStarted);
+    const root='/zeibael-overlap-prime/'+tag;
+    await c.fs.mkdir(root,{recursive:true});
+    await c.mount({'task.mjs':{file:{contents:'console.log("overlap-prime-ok")'}}},{mountPoint:root.startsWith('/')?root.slice(1):root});
+    const taskStarted=performance.now();
+    const spawnStarted=performance.now();
+    const p=await c.spawn('node',['task.mjs'],{cwd:root});
+    const spawn_ms=ms(spawnStarted);
+    const processStarted=performance.now();
+    const output=await collect(p);
+    const exit=await p.exit;
+    const process_ms=ms(processStarted);
+    const task_ms=ms(taskStarted);
+    try{await c.fs.rm(root,{recursive:true,force:true})}catch{}
+    return {
+      mode,tag,ok:exit===0,boot_ms,kernel_ms,prime_ms,critical_ready_ms,
+      spawn_ms,process_ms,task_ms,total_ms:ms(totalStarted),
+      output:String(output||'').trim().slice(-100)
+    }
+  }
+  for(let i=0;i<count;i++){
+    const order=i%2===0?['NO_PRIME','OVERLAP_PRIME']:['OVERLAP_PRIME','NO_PRIME'];
+    for(const mode of order)rows.push(await cycle(mode,(i+1)+'-'+mode.toLowerCase()))
+  }
+  await window.zeibaelResetRuntime();
+  const cleanup_ok=await snapshotDelete('warm-kernel-v1');
+  const noPrime=rows.filter(x=>x.mode==='NO_PRIME'),overlap=rows.filter(x=>x.mode==='OVERLAP_PRIME');
+  const evidence={
+    schema:'zeibael.blitz.overlap-process-prime-benchmark.v1',
+    ok:cleanup_ok===true&&rows.length===count*2&&rows.every(x=>x.ok===true)&&noPrime.length===count&&overlap.length===count,
+    repeats:count,cleanup_ok,rows,
+    medians:{
+      no_prime_total_ms:median(noPrime.map(x=>x.total_ms)),
+      overlap_total_ms:median(overlap.map(x=>x.total_ms)),
+      no_prime_kernel_ms:median(noPrime.map(x=>x.kernel_ms)),
+      overlap_kernel_ms:median(overlap.map(x=>x.kernel_ms)),
+      overlap_prime_ms:median(overlap.map(x=>x.prime_ms)),
+      no_prime_critical_ready_ms:median(noPrime.map(x=>x.critical_ready_ms)),
+      overlap_critical_ready_ms:median(overlap.map(x=>x.critical_ready_ms)),
+      no_prime_task_ms:median(noPrime.map(x=>x.task_ms)),
+      overlap_task_ms:median(overlap.map(x=>x.task_ms)),
+      no_prime_process_ms:median(noPrime.map(x=>x.process_ms)),
+      overlap_process_ms:median(overlap.map(x=>x.process_ms))
+    },
+    isolation:'DUMMY_PRIME_EXITS_BEFORE_REAL_TASK__REAL_TASK_STILL_FRESH_PROCESS',
+    canonical_state:'SUPABASE',live_order_enabled:false
+  };
+  pushRuntimeEvent('overlap_process_prime_benchmark',{ok:evidence.ok,medians:evidence.medians,repeats:count});
+  return evidence
+};
 window.zeibaelRunEnvelope=async(envelope)=>{
   if(!envelope||envelope.schema!=='zeibael.blitz.route.v2')throw new Error('invalid_route_schema');
   if(envelope.live_order_enabled===true)throw new Error('live_order_forbidden');
