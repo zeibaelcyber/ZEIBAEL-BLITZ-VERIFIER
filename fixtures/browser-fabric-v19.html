@@ -499,8 +499,20 @@ window.zeibaelBenchmarkHydration=async({repeats=3}={})=>{
     return {label,primary_mode:primaryMode,boot_ms,idb_lookup_ms,primary,lifecycle,primary_second,other,other_second}
   }
 
-  const cold_direct_first=await coldCycle('DIRECT_WRITE','cold-direct-first');
-  const cold_snapshot_first=await coldCycle('SNAPSHOT_MOUNT','cold-snapshot-first');
+  const coldSequence=[
+    'DIRECT_WRITE','SNAPSHOT_MOUNT',
+    'SNAPSHOT_MOUNT','DIRECT_WRITE',
+    'DIRECT_WRITE','SNAPSHOT_MOUNT'
+  ];
+  const cold_series=[];
+  for(let i=0;i<coldSequence.length;i++){
+    const mode=coldSequence[i];
+    cold_series.push(await coldCycle(mode,'cold-'+(i+1)+'-'+(mode==='DIRECT_WRITE'?'direct':'snapshot')))
+  }
+  const coldDirect=cold_series.filter(x=>x.primary_mode==='DIRECT_WRITE');
+  const coldSnapshot=cold_series.filter(x=>x.primary_mode==='SNAPSHOT_MOUNT');
+  const cold_direct_first=coldDirect[0];
+  const cold_snapshot_first=coldSnapshot[0];
   const c=await boot();
   const repeated=[];
   for(let i=0;i<count;i++){
@@ -539,17 +551,22 @@ window.zeibaelBenchmarkHydration=async({repeats=3}={})=>{
     },
     repeated_same_webcontainer:repeated,
     medians:{
+      cold_direct_first_mutation_ms:benchMedian(coldDirect.map(x=>x.primary.total_ms)),
+      cold_snapshot_first_mutation_ms:benchMedian(coldSnapshot.map(x=>x.primary.total_ms)),
+      cold_direct_boot_ms:benchMedian(coldDirect.map(x=>x.boot_ms)),
+      cold_snapshot_boot_ms:benchMedian(coldSnapshot.map(x=>x.boot_ms)),
       direct_fresh_ms:benchMedian(directFresh),
       direct_second_ms:benchMedian(directSecond),
       snapshot_fresh_ms:benchMedian(snapFresh),
       snapshot_second_ms:benchMedian(snapSecond)
     },
+    cold_series,
     boundaries:{
-      boot_ms:[cold_direct_first.boot_ms,cold_snapshot_first.boot_ms],
-      idb_lookup_ms:[cold_direct_first.idb_lookup_ms,cold_snapshot_first.idb_lookup_ms],
-      spawn_ms:[cold_direct_first.lifecycle.spawn_ms,cold_snapshot_first.lifecycle.spawn_ms],
-      kernel_ready_ms:[cold_direct_first.lifecycle.kernel_ready_ms,cold_snapshot_first.lifecycle.kernel_ready_ms],
-      first_worker_ms:[cold_direct_first.lifecycle.first_worker_ms,cold_snapshot_first.lifecycle.first_worker_ms]
+      boot_ms:cold_series.map(x=>x.boot_ms),
+      idb_lookup_ms:cold_series.map(x=>x.idb_lookup_ms),
+      spawn_ms:cold_series.map(x=>x.lifecycle.spawn_ms),
+      kernel_ready_ms:cold_series.map(x=>x.lifecycle.kernel_ready_ms),
+      first_worker_ms:cold_series.map(x=>x.lifecycle.first_worker_ms)
     },
     canonical_state:'SUPABASE',
     live_order_enabled:false
@@ -558,7 +575,8 @@ window.zeibaelBenchmarkHydration=async({repeats=3}={})=>{
     ok:evidence.ok,
     medians:evidence.medians,
     cold_direct_ms:cold_direct_first.primary.total_ms,
-    cold_snapshot_ms:cold_snapshot_first.primary.total_ms
+    cold_snapshot_ms:cold_snapshot_first.primary.total_ms,
+    cold_samples:{direct:coldDirect.length,snapshot:coldSnapshot.length}
   });
   return evidence
 };
