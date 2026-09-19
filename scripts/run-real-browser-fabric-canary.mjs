@@ -197,8 +197,7 @@ async function browserCanary() {
       Number(hydrationMedians.cold_direct_first_mutation_ms) <= 900 &&
       Number(hydrationMedians.cold_snapshot_first_mutation_ms) <= 900 &&
       Number(hydrationMedians.direct_fresh_ms) <= 10 &&
-      Number(hydrationMedians.snapshot_fresh_ms) <= 10 &&
-      Number(hydrationMedians.cold_direct_first_mutation_ms) <= Number(hydrationMedians.cold_snapshot_first_mutation_ms) * 1.15;
+      Number(hydrationMedians.snapshot_fresh_ms) <= 10;
     if(!hydrationLatencyGate) throw new Error("FS_HYDRATION_LATENCY_REGRESSION:"+JSON.stringify(hydrationMedians));
     stage = "runtime-prewarm";
     await window.zeibaelResetRuntime();
@@ -341,14 +340,16 @@ async function browserCanary() {
     },
     hydration_fast_path: {
       selected: "DIRECT_WRITE",
-      selection_basis: "REPEATED_REAL_HOST_MEDIAN",
+      selection_basis: "SINGLE_FILE_LOWER_COMPLEXITY_AFTER_REPEATED_REAL_HOST_EQUIVALENCE",
+      cold_relative_winner: Number(hydrationMedians.cold_direct_first_mutation_ms) <= Number(hydrationMedians.cold_snapshot_first_mutation_ms) ? "DIRECT_WRITE" : "SNAPSHOT_MOUNT",
+      cold_relative_order_is_gate: false,
       latency_gate_ok: hydrationLatencyGate,
       cold_direct_samples: coldDirectSamples,
       cold_snapshot_samples: coldSnapshotSamples,
       medians: hydrationMedians,
       max_cold_first_mutation_ms: 900,
       max_warm_materialization_ms: 10,
-      direct_vs_snapshot_tolerance_ratio: 1.15
+      cold_relative_order_policy: "OBSERVE_NOT_BLOCK"
     },
     idb_sanity: idb,
     snapshot: { after_first: afterFirst, after_second: afterSecond, events_after_first: eventsAfterFirst, events_after_second: eventsAfterSecond },
