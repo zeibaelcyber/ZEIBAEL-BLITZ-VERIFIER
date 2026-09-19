@@ -22,8 +22,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: blitz-runtime-canary-${{ github.sha }}
-  cancel-in-progress: false
+  group: blitz-runtime-canary-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   real-webcontainer:
