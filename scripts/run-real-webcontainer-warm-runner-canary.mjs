@@ -59,7 +59,21 @@ async function main() {
       throw new Error("CROSS_ORIGIN_ISOLATION_REQUIRED");
     }
     status.textContent = "IMPORTING_WEBCONTAINER_API";
-    const { WebContainer } = await import("https://esm.sh/@webcontainer/api@${API_VERSION}");
+    let WebContainer = null;
+    let importError = null;
+    for (const url of [
+      "https://esm.sh/@webcontainer/api@${API_VERSION}",
+      "https://cdn.jsdelivr.net/npm/@webcontainer/api@${API_VERSION}/+esm"
+    ]) {
+      try {
+        const mod = await Promise.race([
+          import(url),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("IMPORT_TIMEOUT:" + url)), 10000))
+        ]);
+        if (typeof mod?.WebContainer === "function") { WebContainer = mod.WebContainer; break; }
+      } catch (e) { importError = String(e?.message || e); }
+    }
+    if (!WebContainer) throw new Error("WEBCONTAINER_API_IMPORT_FAILED:" + String(importError || "unknown"));
     status.textContent = "WEBCONTAINER_BOOT";
     wc = await WebContainer.boot({ coep: "credentialless" });
     status.textContent = "MOUNTING";
