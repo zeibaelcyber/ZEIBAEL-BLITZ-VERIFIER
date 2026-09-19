@@ -11,7 +11,7 @@ const sources = {
   warmKernel: await readFile("src/warm-kernel.mjs", "utf8"),
   blitzCache: await readFile("src/blitz-cache.mjs", "utf8"),
   warmRunner: await readFile("services/warm-runner/server.mjs", "utf8"),
-  selftest: await readFile("services/warm-runner/selftest.mjs", "utf8"),
+  probe: await readFile("services/warm-runner/canary-probe.mjs", "utf8"),
 };
 
 const tree = {
@@ -22,7 +22,7 @@ const tree = {
   services: { directory: {
     "warm-runner": { directory: {
       "server.mjs": { file: { contents: sources.warmRunner } },
-      "selftest.mjs": { file: { contents: sources.selftest } },
+      "canary-probe.mjs": { file: { contents: sources.probe } },
     }},
   }},
 };
@@ -71,16 +71,40 @@ async function main() {
     if (nodeExit !== 0) throw new Error("NODE_PROBE_FAILED");
     const node = JSON.parse(nodeOut.trim());
 
-    status.textContent = "WARM_RUNNER_SELFTEST";
-    const proc = await wc.spawn("node", ["services/warm-runner/selftest.mjs"]);
-    const output = await collect(proc);
-    const exit = await proc.exit;
-    const marker = output.split(/\\r?\\n/).find(line => line.startsWith("BLITZ_WARM_RUNNER_SELFTEST="));
-    if (!marker) throw new Error("WARM_RUNNER_SENTINEL_MISSING:" + output.slice(-4000));
-    const warm = JSON.parse(marker.slice("BLITZ_WARM_RUNNER_SELFTEST=".length));
+    status.textContent = "WARM_RUNNER_SERVER";
+    const runner = await wc.spawn(
+      "node",
+      ["services/warm-runner/server.mjs"],
+      {
+        env: {
+          PORT: "19091",
+          ZEIBAEL_BURST_TOKEN: "selftest-token",
+          NODE_ENV: "production",
+          ZEIBAEL_LIVE_ORDER_ENABLED: "false"
+        },
+        output: false
+      }
+    );
+    let warm;
+    let probeExit = 1;
+    try {
+      status.textContent = "WARM_RUNNER_PROBE";
+      const proc = await wc.spawn(
+        "node",
+        ["services/warm-runner/canary-probe.mjs"],
+        { env: { PORT: "19091", ZEIBAEL_BURST_TOKEN: "selftest-token" } }
+      );
+      const output = await collect(proc);
+      probeExit = await proc.exit;
+      const marker = output.split(/\\r?\\n/).find(line => line.startsWith("BLITZ_WARM_RUNNER_SELFTEST="));
+      if (!marker) throw new Error("WARM_RUNNER_SENTINEL_MISSING:" + output.slice(-4000));
+      warm = JSON.parse(marker.slice("BLITZ_WARM_RUNNER_SELFTEST=".length));
+    } finally {
+      try { runner.kill(); } catch {}
+    }
     const evidence = {
       schema: "zeibael.blitz.webcontainer-warm-runner-canary.v1",
-      ok: exit === 0 && warm.ok === true,
+      ok: probeExit === 0 && warm.ok === true,
       runtime: "STACKBLITZ_WEBCONTAINER",
       webcontainer_api_version: "${API_VERSION}",
       cross_origin_isolated: self.crossOriginIsolated,
