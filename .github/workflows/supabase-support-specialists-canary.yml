@@ -1,0 +1,34 @@
+name: Supabase Support Specialists Canary
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/supabase-support-specialists-canary.yml"
+      - "scripts/supabase-specialists-canary.mjs"
+      - "scripts/supabase-specialists-canary.mcp.json"
+      - "scripts/zeibael_duckdb_analytics_mcp.py"
+      - "scripts/run_redis_mcp.sh"
+      - "scripts/run_upstash_full_mcp.sh"
+permissions:
+  contents: read
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.17"
+      - name: Preinstall Redis MCP runtime
+        run: |
+          uv python install 3.14
+          uvx --python 3.14 --from redis-mcp-server==0.5.1 redis-mcp-server --help >/dev/null
+      - name: Start local Redis
+        run: |
+          docker run -d --rm --name zeibael-redis-canary -p 6379:6379 redis:8.2-alpine
+          for i in $(seq 1 30); do docker exec zeibael-redis-canary redis-cli ping | grep -q PONG && break; sleep 1; done
+      - name: Run specialist MCP canary
+        run: node scripts/supabase-specialists-canary.mjs
