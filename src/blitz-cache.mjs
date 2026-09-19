@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-const DEFAULT_MAX_ENTRIES = 1024;
+const DEFAULT_MAX_ENTRIES = 4096;
 
 function nowMs() { return Date.now(); }
 
@@ -9,7 +9,8 @@ export async function openBlitzResultCache(options = {}) {
   const dir = resolve(options.dir || process.env.ZEIBAEL_BLITZ_CACHE_DIR || '.zeibael-blitz-cache');
   const file = resolve(dir, 'results-v1.json');
   const temp = resolve(dir, `results-v1.${process.pid}.tmp`);
-  const maxEntries = Math.max(16, Number(options.maxEntries || DEFAULT_MAX_ENTRIES));
+  const configuredMax = Number(options.maxEntries || process.env.ZEIBAEL_BLITZ_CACHE_MAX_ENTRIES || DEFAULT_MAX_ENTRIES);
+  const maxEntries = Math.max(16, Math.min(65536, Number.isFinite(configuredMax) ? Math.floor(configuredMax) : DEFAULT_MAX_ENTRIES));
   const entries = new Map();
   let dirty = false;
 
