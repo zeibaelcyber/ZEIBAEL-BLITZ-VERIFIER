@@ -159,8 +159,13 @@ async function browserCanary() {
     tasks: [{ id: "fs-write", code: fsCode, cache_safe: false, kernel_safe: false }],
     concurrency: 1,
   });
-  await wait(1500);
-  const watchEvents = window.zeibaelEvents().filter(x => x && x.type === "fs_change");
+  let watchEvents = [];
+  const watchDeadline = Date.now() + 5000;
+  while (Date.now() < watchDeadline) {
+    watchEvents = window.zeibaelEvents().filter(x => x && x.type === "fs_change");
+    if (watchEvents.length >= 1) break;
+    await wait(100);
+  }
   stage = "export-digest";
   const exportDigest = await window.zeibaelExportDigest({ path: "/", format: "json" });
 
