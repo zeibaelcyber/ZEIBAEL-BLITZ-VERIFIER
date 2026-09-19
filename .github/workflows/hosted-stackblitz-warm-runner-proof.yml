@@ -1,0 +1,38 @@
+name: Hosted StackBlitz Warm Runner Proof
+
+on:
+  push:
+    branches:
+      - acker/hosted-stackblitz-warm-runner-sentinel-20260919
+    paths:
+      - "package.json"
+      - "services/warm-runner/**"
+      - "scripts/run-real-webcontainer-warm-runner-canary.mjs"
+      - "scripts/write-warm-runner-stackblitz-evidence.mjs"
+      - ".github/workflows/hosted-stackblitz-warm-runner-proof.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  hosted-stackblitz-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact branch commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout --detach FETCH_HEAD
+
+      - name: Run hosted StackBlitz Warm Runner proof
+        run: node scripts/run-real-webcontainer-warm-runner-canary.mjs
+
+      - name: Print safe evidence
+        if: always()
+        shell: bash
+        run: |
+          test -f evidence/warm-runner-real-webcontainer.json && cat evidence/warm-runner-real-webcontainer.json || true
