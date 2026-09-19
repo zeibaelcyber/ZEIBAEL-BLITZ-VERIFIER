@@ -141,6 +141,7 @@ async function runTasks(tasks,requestedConcurrency,workloadProfile){
   const normalized=normalizeTasks(tasks),results=new Array(normalized.length);
   let hits=0,misses=0,writes=0,coalesced=0,executed=0,attempts=0,cursor=0;
   const inFlightByKey=new Map();
+  const deferredFollowers=[];
   const selected=profileCap(workloadProfile);
   const effective=Math.max(1,Math.min(MAX_CONCURRENCY,selected.cap,Number(requestedConcurrency)||normalized.length,normalized.length));
 
@@ -153,16 +154,19 @@ async function runTasks(tasks,requestedConcurrency,workloadProfile){
     }
 
     if(key&&inFlightByKey.has(key)){
-      const shared=await inFlightByKey.get(key);
+      const sharedPromise=inFlightByKey.get(key);
       coalesced++;
-      results[i]={
-        ...shared,
-        id:task.id,
-        elapsed_ms:0,
-        cache_hit:false,
-        coalesced:true,
-        execution_mode:mode==="INITIAL"?"PERSISTENT_WARM_KERNEL_COALESCED":"PERSISTENT_WARM_KERNEL_ADAPTIVE_RETRY_COALESCED"
-      };
+      deferredFollowers.push((async()=>{
+        const shared=await sharedPromise;
+        results[i]={
+          ...shared,
+          id:task.id,
+          elapsed_ms:0,
+          cache_hit:false,
+          coalesced:true,
+          execution_mode:mode==="INITIAL"?"PERSISTENT_WARM_KERNEL_COALESCED":"PERSISTENT_WARM_KERNEL_ADAPTIVE_RETRY_COALESCED"
+        };
+      })());
       return;
     }
 
@@ -202,6 +206,10 @@ async function runTasks(tasks,requestedConcurrency,workloadProfile){
       }
     }
     await Promise.all(Array.from({length:Math.max(1,Math.min(concurrency,indexes.length))},worker));
+    if(deferredFollowers.length){
+      const followers=deferredFollowers.splice(0,deferredFollowers.length);
+      await Promise.all(followers);
+    }
   }
 
   const initialIndexes=normalized.map((_,i)=>i);
@@ -262,7 +270,7 @@ function send(res,status,body){res.statusCode=status;res.setHeader("content-type
 const server=http.createServer(async(req,res)=>{
   if(req.url==="/health"){
     if(!ready){try{await ensureKernel()}catch{}}
-    return send(res,200,{ok:ready,runner:"ZEIBAEL_BLITZ_WARM_RUNNER_V2",ready,kernel_pid:kernelPid,starts,restarts,recovery_cycles:recoveryCycles,last_boot_at:lastBootAt,last_run_at:lastRunAt,runs,cache_entries:cache.size(),max_tasks:MAX_TASKS,max_concurrency:MAX_CONCURRENCY,proven_worker_ceiling:PROVEN_WORKER_CEILING,adaptive_concurrency:true,profile_caps:PROFILE_CAPS,optimization_counters:{packets:optimizationPackets,downshift_packets:optimizationDownshifts,retried_tasks:optimizationRetriedTasks,recovered_tasks:optimizationRecoveredTasks,coalesced_tasks:optimizationCoalescedTasks},canonical_state:"SUPABASE",zero_spend_required:true,live_order_enabled:false});
+    return send(res,200,{ok:ready,runner:"ZEIBAEL_BLITZ_WARM_RUNNER_V2",ready,kernel_pid:kernelPid,starts,restarts,recovery_cycles:recoveryCycles,last_boot_at:lastBootAt,last_run_at:lastRunAt,runs,cache_entries:cache.size(),max_tasks:MAX_TASKS,max_concurrency:MAX_CONCURRENCY,proven_worker_ceiling:PROVEN_WORKER_CEILING,adaptive_concurrency:true,slot_preserving_coalescing:true,profile_caps:PROFILE_CAPS,optimization_counters:{packets:optimizationPackets,downshift_packets:optimizationDownshifts,retried_tasks:optimizationRetriedTasks,recovered_tasks:optimizationRecoveredTasks,coalesced_tasks:optimizationCoalescedTasks},canonical_state:"SUPABASE",zero_spend_required:true,live_order_enabled:false});
   }
   if(req.url!=="/burst"||req.method!=="POST")return send(res,404,{ok:false,error:"not_found"});
   if(!TOKEN||req.headers.authorization!=="Bearer "+TOKEN)return send(res,401,{ok:false,error:"unauthorized"});
