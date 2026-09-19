@@ -30,8 +30,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          npm config set allow-scripts=openclaw,@google/genai,protobufjs,tree-sitter-bash --location=user
           npm install --global openclaw@2026.6.35
-          test "$(openclaw --version | tr -d '\r')" = "2026.6.35"
+          openclaw --version | tee "$RUNNER_TEMP/openclaw-version.txt"
+          grep -F '2026.6.35' "$RUNNER_TEMP/openclaw-version.txt" >/dev/null
           docker build -t openclaw-sandbox:bookworm-slim - <<'DOCKERFILE'
           FROM debian:bookworm-slim
           ENV DEBIAN_FRONTEND=noninteractive
