@@ -24,9 +24,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout exact commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Setup Node 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Stress 4096-job event-driven scheduler
