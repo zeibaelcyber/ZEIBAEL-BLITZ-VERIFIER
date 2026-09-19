@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-ROOT=Path(__file__).resolve().parents[2]
+ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"integrations"/"supabase-migration"))
 from shadow_adapters import redis_shadow_record, telemetry_shadow_event, cloudflare_shadow_envelope
 
