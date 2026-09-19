@@ -246,16 +246,19 @@ try{
         const r=await probe(mid,"binary");
         if(r.ok)low=mid;else high=mid;
       }
-      const confirmGood=await probe(low,"confirm_pass_sustained",2);
-      const confirmBad=await probe(high,"confirm_fail",1);
-      const exact=confirmGood.ok&&!confirmBad.ok&&high===low+1;
+      const confirmGood1=await probe(low,"confirm_pass_1",1);
+      const confirmBad1=await probe(high,"confirm_fail_1",1);
+      const confirmGood2=await probe(low,"confirm_pass_2",1);
+      const confirmBad2=await probe(high,"confirm_fail_2",1);
+      const exact=confirmGood1.ok&&!confirmBad1.ok&&confirmGood2.ok&&!confirmBad2.ok&&high===low+1;
       const finalResult={
-        schema:"zeibael.blitz.accelerator-capacity.v4",
+        schema:"zeibael.blitz.accelerator-capacity.v5",
         status:exact?"EXACT_BOUNDARY_CONFIRMED":"VARIABLE_BOUNDARY",
         max_stable_parallel_slots:exact?low:null,
         first_timeout_or_fail:exact?high:null,
-        safe_operating_slots:Math.max(1,Math.floor(low*0.9)),
-        sustained_confirmation_count:confirmGood.count,
+        safe_operating_slots:low,
+        confirmation_rounds:2,
+        confirmation_same_workload:true,
         worker_thread_ceiling_reference:1791,
         probes
       };
