@@ -10,13 +10,17 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: zeibael-acker-accelerator-wave
+  cancel-in-progress: true
+
 jobs:
   probe:
     strategy:
       fail-fast: false
       max-parallel: 20
       matrix:
-        candidate: [16,24,32,48,64,96,128,192,256,384,512]
+        candidate: [16,24,32,48,57,64,80,96,128,192,256,384,512,768,1024,1280,1536,1791]
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
