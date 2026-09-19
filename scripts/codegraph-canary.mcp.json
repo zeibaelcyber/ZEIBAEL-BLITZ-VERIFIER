@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "codegraph": {
+      "command": "npx",
+      "args": [
+        "--yes",
+        "@sdsrs/code-graph@0.153.0"
+      ],
+      "env": {
+        "CODE_GRAPH_NO_AUTO_UPDATE": "1",
+        "CODE_GRAPH_DISABLE_MODEL_DOWNLOAD": "1",
+        "CODE_GRAPH_NO_AUTO_ADOPT": "1",
+        "CODE_GRAPH_NO_GITIGNORE": "1"
+      }
+    }
+  }
+}
