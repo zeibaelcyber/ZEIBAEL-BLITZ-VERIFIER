@@ -713,6 +713,114 @@ window.zeibaelExportDigest=async({path='/',format='json'}={})=>{
   pushRuntimeEvent('export_digest',{path,format,bytes:raw.byteLength,sha256});
   return {ok:true,path,format,bytes:raw.byteLength,sha256}
 };
+window.zeibaelBenchmarkKernelLaunch=async({repeats=3}={})=>{
+  const count=Math.max(2,Math.min(4,Number(repeats)||3));
+  const rows=[];
+  const ms=t=>Math.round((performance.now()-t)*100)/100;
+  const median=xs=>{
+    const a=xs.map(Number).filter(Number.isFinite).sort((x,y)=>x-y);
+    if(!a.length)return null;
+    const m=Math.floor(a.length/2);
+    return a.length%2?a[m]:Math.round(((a[m-1]+a[m])/2)*100)/100
+  };
+  async function one(mode,tag){
+    await window.zeibaelResetRuntime();
+    const totalStarted=performance.now();
+    const bootStarted=performance.now();
+    const c=await boot();
+    const boot_ms=ms(bootStarted);
+    let prep_ms=0,spawn_ms=0,proc;
+    if(mode==='FILE_KERNEL'){
+      const root='/zeibael-kernel-launch-bench/'+tag;
+      const prepStarted=performance.now();
+      await c.fs.mkdir(root,{recursive:true});
+      await c.fs.writeFile(root+'/kernel.mjs',WARM_KERNEL_SOURCE);
+      prep_ms=ms(prepStarted);
+      const spawnStarted=performance.now();
+      proc=await c.spawn('node',['kernel.mjs'],{cwd:root});
+      spawn_ms=ms(spawnStarted)
+    }else if(mode==='INLINE_KERNEL'){
+      const spawnStarted=performance.now();
+      proc=await c.spawn('node',['--input-type=module','-e',WARM_KERNEL_SOURCE]);
+      spawn_ms=ms(spawnStarted)
+    }else throw new Error('KERNEL_LAUNCH_MODE_INVALID:'+mode);
+    const writer=proc.input.getWriter();
+    const reader=proc.output.getReader();
+    let buffer='',readyResolve,readyReject,responseResolve,responseReject;
+    const request_id='kernel-launch-'+tag+'-'+Date.now();
+    const readyP=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject});
+    const responseP=new Promise((resolve,reject)=>{responseResolve=resolve;responseReject=reject});
+    void (async()=>{
+      try{
+        for(;;){
+          const item=await reader.read();if(item.done)break;
+          buffer+=item.value;
+          for(;;){
+            const nl=buffer.indexOf('\n');if(nl<0)break;
+            const line=buffer.slice(0,nl).trim();buffer=buffer.slice(nl+1);
+            if(!line)continue;
+            if(line==='ZK1_READY'){readyResolve(true);continue}
+            if(line.startsWith('ZK1:')){
+              try{
+                const row=JSON.parse(line.slice(4));
+                if(row?.request_id===request_id)responseResolve(row)
+              }catch{}
+            }
+          }
+        }
+        readyReject(new Error('KERNEL_LAUNCH_STREAM_ENDED'));
+        responseReject(new Error('KERNEL_LAUNCH_STREAM_ENDED'))
+      }catch(e){readyReject(e);responseReject(e)}
+    })();
+    try{
+      const readyStarted=performance.now();
+      await Promise.race([readyP,new Promise((_,reject)=>setTimeout(()=>reject(new Error('KERNEL_LAUNCH_READY_TIMEOUT')),8000))]);
+      const ready_wait_ms=ms(readyStarted);
+      const taskStarted=performance.now();
+      await writer.write(JSON.stringify({request_id,id:'kernel-launch-'+tag,code:'console.log(42)',timeout_ms:2000})+'\n');
+      const result=await Promise.race([responseP,new Promise((_,reject)=>setTimeout(()=>reject(new Error('KERNEL_LAUNCH_TASK_TIMEOUT')),5000))]);
+      const first_task_ms=ms(taskStarted);
+      return {
+        mode,tag,ok:result?.ok===true&&String(result?.output||'').includes('42'),
+        boot_ms,prep_ms,spawn_ms,ready_wait_ms,first_task_ms,
+        worker_elapsed_ms:Number(result?.elapsed_ms)||null,
+        worker_mode:result?.worker_mode||null,
+        total_ms:ms(totalStarted)
+      }
+    }finally{
+      try{proc.kill()}catch{}
+    }
+  }
+  for(let i=0;i<count;i++){
+    const order=i%2===0?['FILE_KERNEL','INLINE_KERNEL']:['INLINE_KERNEL','FILE_KERNEL'];
+    for(const mode of order)rows.push(await one(mode,(i+1)+'-'+mode.toLowerCase()))
+  }
+  await window.zeibaelResetRuntime();
+  const file=rows.filter(x=>x.mode==='FILE_KERNEL');
+  const inline=rows.filter(x=>x.mode==='INLINE_KERNEL');
+  const evidence={
+    schema:'zeibael.blitz.kernel-launch-benchmark.v1',
+    ok:rows.length===count*2&&rows.every(x=>x.ok===true)&&file.length===count&&inline.length===count,
+    repeats:count,rows,
+    medians:{
+      file_total_ms:median(file.map(x=>x.total_ms)),
+      inline_total_ms:median(inline.map(x=>x.total_ms)),
+      file_boot_ms:median(file.map(x=>x.boot_ms)),
+      inline_boot_ms:median(inline.map(x=>x.boot_ms)),
+      file_prep_ms:median(file.map(x=>x.prep_ms)),
+      file_spawn_ms:median(file.map(x=>x.spawn_ms)),
+      inline_spawn_ms:median(inline.map(x=>x.spawn_ms)),
+      file_ready_wait_ms:median(file.map(x=>x.ready_wait_ms)),
+      inline_ready_wait_ms:median(inline.map(x=>x.ready_wait_ms)),
+      file_first_task_ms:median(file.map(x=>x.first_task_ms)),
+      inline_first_task_ms:median(inline.map(x=>x.first_task_ms))
+    },
+    canonical_state:'SUPABASE',
+    live_order_enabled:false
+  };
+  pushRuntimeEvent('kernel_launch_benchmark',{ok:evidence.ok,medians:evidence.medians,repeats:count});
+  return evidence
+};
 window.zeibaelBenchmarkColdSpawn=async({repeats=3}={})=>{
   const count=Math.max(2,Math.min(5,Number(repeats)||3));
   const c=await boot();
