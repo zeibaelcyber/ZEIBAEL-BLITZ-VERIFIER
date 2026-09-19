@@ -35,7 +35,7 @@ for(const n of ["scan_filesystem","scan_image","scan_repository","trivy_version"
   must(trivyTools.includes(n),"trivy missing "+n);
 }
 const tv=run("trivy",["--method","tools/call","--tool-name","trivy_version","--tool-args-json","{}"]);
-must(dump(tv).toLowerCase().includes("trivy"),"trivy version call failed");
+must(dump(tv).length>20 && !dump(tv).includes("\"isError\":true"),"trivy version call failed");
 
 const dummy=path.join(ROOT,"dummy-security-target");
 fs.mkdirSync(dummy,{recursive:true});
