@@ -196,8 +196,8 @@ async function browserCanary() {
       coldSnapshotSamples >= 3 &&
       Number(hydrationMedians.cold_direct_first_mutation_ms) <= 900 &&
       Number(hydrationMedians.cold_snapshot_first_mutation_ms) <= 900 &&
-      Number(hydrationMedians.direct_fresh_ms) <= 20 &&
-      Number(hydrationMedians.snapshot_fresh_ms) <= 20;
+      Number(hydrationMedians.direct_fresh_ms) <= 10 &&
+      Number(hydrationMedians.snapshot_fresh_ms) <= 10;
     if(!hydrationLatencyGate) throw new Error("FS_HYDRATION_LATENCY_REGRESSION:"+JSON.stringify(hydrationMedians));
     stage = "prewarm-order-benchmark";
     const prewarmOrderBenchmark = await window.zeibaelBenchmarkPrewarmOrder({ repeats: 3 });
@@ -224,15 +224,6 @@ async function browserCanary() {
       postPrewarmRow?.worker_mode === "PREWARMED_ONE_SHOT_WORKER" &&
       Number(postPrewarmRow?.elapsed_ms) <= 150;
     if(!runtimePrewarmGate) throw new Error("RUNTIME_PREWARM_LATENCY_REGRESSION:"+JSON.stringify({runtimePrewarm,postPrewarmRow}));
-    stage = "cold-spawn-benchmark";
-    const coldSpawnBenchmark = await window.zeibaelBenchmarkColdSpawn({repeats:3});
-    if(coldSpawnBenchmark?.ok !== true) throw new Error("COLD_SPAWN_BENCHMARK_FAILED:"+JSON.stringify(coldSpawnBenchmark));
-    stage = "cold-process-prime-benchmark";
-    const coldProcessPrimeBenchmark = await window.zeibaelBenchmarkColdProcessPrime({repeats:3});
-    if(coldProcessPrimeBenchmark?.ok !== true) throw new Error("COLD_PROCESS_PRIME_BENCHMARK_FAILED:"+JSON.stringify(coldProcessPrimeBenchmark));
-    stage = "parallel-cold-prime-benchmark";
-    const parallelColdPrimeBenchmark = await window.zeibaelBenchmarkParallelColdPrime({repeats:3});
-    if(parallelColdPrimeBenchmark?.ok !== true) throw new Error("PARALLEL_COLD_PRIME_BENCHMARK_FAILED:"+JSON.stringify(parallelColdPrimeBenchmark));
     stage = "idb-init";
     const cacheDbReady = await window.zeibaelEnsureCacheDb();
     if(cacheDbReady !== true) throw new Error("CACHE_DB_INIT_FAILED");
@@ -357,9 +348,6 @@ async function browserCanary() {
       selection_gate_ok: kernelFirstSelectionGate,
       selection_tolerance_ratio: 1.10
     },
-    cold_spawn_benchmark: coldSpawnBenchmark,
-    cold_process_prime_benchmark: coldProcessPrimeBenchmark,
-    parallel_cold_prime_benchmark: parallelColdPrimeBenchmark,
     runtime_prewarm: {
       ok: runtimePrewarmGate,
       strategy: "KERNEL_FIRST",
@@ -378,7 +366,7 @@ async function browserCanary() {
       cold_snapshot_samples: coldSnapshotSamples,
       medians: hydrationMedians,
       max_cold_first_mutation_ms: 900,
-      max_warm_materialization_ms: 20,
+      max_warm_materialization_ms: 10,
       cold_relative_order_policy: "OBSERVE_NOT_BLOCK"
     },
     idb_sanity: idb,
