@@ -10,8 +10,12 @@ if (!Number.isInteger(CANDIDATE) || CANDIDATE < 1) throw new Error('Invalid CAND
 const html = `<!doctype html><meta charset="utf-8"><title>ZEIBAEL Accelerator Probe</title>
 <pre id="status">BOOTING</pre><pre id="result"></pre>
 <script type="module">
-import { WebContainer } from 'https://esm.sh/@webcontainer/api@1.6.4';
+let WebContainer=null,lastImportError=null;
+for(const url of ['https://esm.sh/@webcontainer/api@1.6.4','https://cdn.jsdelivr.net/npm/@webcontainer/api@1.6.4/+esm']){
+  try{const mod=await import(url);if(typeof mod?.WebContainer==='function'){WebContainer=mod.WebContainer;break}}catch(e){lastImportError=String(e?.message||e)}
+}
 window.__done=false; window.__result=null;
+if(!WebContainer){window.__result={candidate:${CANDIDATE},ok:false,timeout:false,error:'WEBCONTAINER_IMPORT_FAILED:'+String(lastImportError||'unknown')};window.__done=true;throw new Error(window.__result.error)}
 
 async function drain(proc){
   const r=proc.output.getReader();
