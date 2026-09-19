@@ -1,4 +1,4 @@
-# sentinel-contract-v6
+# sentinel-contract-v7
 name: Blitz Runtime Canary
 
 on:
@@ -8,6 +8,7 @@ on:
       - main
     paths:
       - ".github/workflows/blitz-runtime-canary.yml"
+      - ".github/workflows/blitz-parallel-sweep.yml"
       - "src/warm-kernel.mjs"
       - "src/blitz-cache.mjs"
       - "services/warm-runner/**"
