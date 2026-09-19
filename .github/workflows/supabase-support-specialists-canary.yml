@@ -22,6 +22,10 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           version: "0.12.17"
+      - name: Preinstall Redis MCP runtime
+        run: |
+          uv python install 3.14
+          uvx --python 3.14 --from redis-mcp-server==0.5.1 redis-mcp-server --help >/dev/null
       - name: Start local Redis
         run: |
           docker run -d --rm --name zeibael-redis-canary -p 6379:6379 redis:8.2-alpine
