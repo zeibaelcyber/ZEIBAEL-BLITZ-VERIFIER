@@ -193,4 +193,4 @@ if(low===P.hard_cap && high===null){
 console.log('ZEIBAEL_CAPABILITY_RESULT='+JSON.stringify(result));
 await postEvidence('final',Number(result.safe_max||result.burst_max||result.last_stable_observed||0),{profile:PROFILE,status:result.status,safe_max:result.safe_max??null,burst_max:result.burst_max??null,first_fail:result.first_fail??null,last_stable_observed:result.last_stable_observed??null,config:P,benchmark_id:benchmarkId});
 await browser.close(); server.close();
-process.exit(result.status==='EXACT'||result.status==='LOWER_BOUND_ONLY'?0:2);
+process.exit(['EXACT','LOWER_BOUND_ONLY','VARIABLE'].includes(result.status)?0:2);
