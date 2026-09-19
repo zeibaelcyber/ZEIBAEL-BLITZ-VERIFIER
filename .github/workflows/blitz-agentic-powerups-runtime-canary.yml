@@ -1,0 +1,92 @@
+name: Blitz Agentic Powerups Runtime Canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/blitz-agentic-powerups-runtime-canary.yml"
+      - "scripts/blitz-agentic-powerups-canary.mjs"
+      - "scripts/blitz-agentic-powerups-canary.mcp.json"
+      - "scripts/blitz-agentic-shell-canary.sh"
+      - "scripts/blitz-shell-direct-canary.mjs"
+      - "scripts/run_zenith_safe_mcp.sh"
+      - "scripts/patch_zenith_safe.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-filesystem-codegraph:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Install exact core canary dependencies
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund --save-exact \
+            @modelcontextprotocol/inspector@2.0.0 \
+            @modelcontextprotocol/server-filesystem@2026.8.31 \
+            @sdsrs/code-graph@0.153.0
+      - name: Verify Filesystem and CodeGraph
+        run: node scripts/blitz-agentic-powerups-canary.mjs core
+
+  zenith-safe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - uses: astral-sh/setup-uv@v7
+      - name: Install Inspector
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund --save-exact @modelcontextprotocol/inspector@2.0.0
+      - name: Prewarm pinned Zenith source
+        run: |
+          uvx --from 'git+https://github.com/Intelligent-Internet/zenith@a8d9b5786f81e70e73cce7bb164f5f83da84a4b5#subdirectory=zenith' \
+            zenith-server --help >/dev/null
+      - name: Verify safe Zenith MCP protocol
+        run: node scripts/blitz-agentic-powerups-canary.mjs zenith
+
+  shell-restrictive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Install Bubblewrap isolation
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          bwrap --version
+      - name: Prewarm pinned Shell MCP
+        run: npx --yes @mako10k/mcp-shell-server@2.8.1 --version
+      - name: Install exact MCP SDK
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund --save-exact @modelcontextprotocol/sdk@1.26.0
+      - name: Verify restrictive Shell or fail-closed host gate
+        run: timeout 90s node scripts/blitz-shell-direct-canary.mjs
+
+  wolfram-cloud:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Verify official free Wolfram Cloud MCP
+        run: node scripts/blitz-agentic-powerups-canary.mjs wolfram
