@@ -25,6 +25,22 @@ const WEBCONTAINER_SAFE_PARALLEL_SLOTS =
     ? Math.min(WORKER_THREAD_CEILING_REFERENCE, Math.floor(configuredConcurrencyCap))
     : DEFAULT_WEBCONTAINER_SAFE_PARALLEL_SLOTS;
 const DEFAULT_CACHE_TTL_MS = 10 * 60 * 1000;
+const WORKLOAD_CAPS = Object.freeze({
+  LIGHT: 17,
+  IO: 23,
+  BUILD_TEST: 24,
+  CPU_HEAVY: 32
+});
+function workloadProfile(job) {
+  const explicit = String(job?.workload_profile || packet?.workload_profile || '').toUpperCase();
+  if (Object.prototype.hasOwnProperty.call(WORKLOAD_CAPS, explicit)) return explicit;
+  if (job?.type === 'http') return 'IO';
+  if (job?.type === 'command') return 'BUILD_TEST';
+  return 'LIGHT';
+}
+function workloadCap(profile) {
+  return Math.min(WEBCONTAINER_SAFE_PARALLEL_SLOTS, WORKLOAD_CAPS[profile] || WEBCONTAINER_SAFE_PARALLEL_SLOTS);
+}
 const requestedConcurrency = Number(packet.max_concurrency ?? packet.concurrency ?? jobs.length);
 const maxConcurrency =
   Number.isFinite(requestedConcurrency) && requestedConcurrency >= 1
@@ -176,6 +192,7 @@ function depsTerminal(job) {
 
 const pending = new Set(jobs.map(j => j.id));
 const running = new Map();
+const runningByProfile = new Map(Object.keys(WORKLOAD_CAPS).map(k => [k, 0]));
 const readyOrder = jobs.map(j => j.id).sort((a, b) => (executionRank.get(a) ?? 999999) - (executionRank.get(b) ?? 999999));
 
 while (pending.size || running.size) {
@@ -185,13 +202,21 @@ while (pending.size || running.size) {
     if (!pending.has(id)) continue;
     if (running.size >= maxConcurrency) break;
     const job = byId.get(id);
+    const profile = workloadProfile(job);
+    if ((runningByProfile.get(profile) || 0) >= workloadCap(profile)) continue;
     if (depsSatisfied(job)) {
       pending.delete(id);
       launched++;
+      runningByProfile.set(profile, (runningByProfile.get(profile) || 0) + 1);
       const p = execute(job).then(result => {
         state.set(id, result);
         running.delete(id);
+        runningByProfile.set(profile, Math.max(0, (runningByProfile.get(profile) || 1) - 1));
         return result;
+      }, error => {
+        running.delete(id);
+        runningByProfile.set(profile, Math.max(0, (runningByProfile.get(profile) || 1) - 1));
+        throw error;
       });
       running.set(id, p);
     } else if (depsTerminal(job)) {
@@ -249,6 +274,8 @@ const output = {
   worker_thread_ceiling_reference: WORKER_THREAD_CEILING_REFERENCE,
   webcontainer_safe_parallel_slots: WEBCONTAINER_SAFE_PARALLEL_SLOTS,
   adaptive_concurrency_cap: true,
+  workload_profile_caps: WORKLOAD_CAPS,
+  workload_profile_policy: 'GLOBAL_64_PLUS_PER_PROFILE_LANES',
   cache: {
     enabled: true,
     policy: 'EXPLICIT_CACHE_SAFE_ONLY',
