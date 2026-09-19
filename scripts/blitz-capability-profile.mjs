@@ -3,6 +3,15 @@ import puppeteer from 'puppeteer';
 
 const PROFILE = process.env.PROFILE || 'LIGHT';
 const PORT = 4174;
+const EVIDENCE_URL='https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-blitz-worker-evidence';
+const benchmarkId='blitz-capability-profile-'+PROFILE.toLowerCase()+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);
+async function postEvidence(event,worker_n,payload){
+  try{
+    const r=await fetch(EVIDENCE_URL,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({benchmark_id:benchmarkId,event,worker_n,payload})});
+    if(!r.ok) console.error('CAPABILITY_EVIDENCE_POST_FAILED',event,worker_n,r.status);
+    return r.ok;
+  }catch(e){console.error('CAPABILITY_EVIDENCE_POST_FAILED',event,worker_n,String(e?.message||e));return false}
+}
 const CONFIG = {
   LIGHT: { timeout_ms: 15000, hard_cap: 1024, safe_ratio: 0.80 },
   IO: { timeout_ms: 20000, hard_cap: 512, safe_ratio: 0.75 },
@@ -18,11 +27,16 @@ const html = `<!doctype html>
 <title>ZEIBAEL Capability ${PROFILE}</title>
 <pre id="status">BOOTING</pre><pre id="result"></pre>
 <script type="module">
-import { WebContainer } from 'https://esm.sh/@webcontainer/api@1.6.4';
 const PROFILE = ${JSON.stringify(PROFILE)};
 const P = ${JSON.stringify(P)};
 const statusEl=document.getElementById('status'), resultEl=document.getElementById('result');
 window.__done=false; window.__result=null;
+async function importWithTimeout(url,ms=8000){let timer;try{return await Promise.race([import(url),new Promise((_,reject)=>timer=setTimeout(()=>reject(new Error('IMPORT_TIMEOUT:'+url)),ms))])}finally{clearTimeout(timer)}}
+let WebContainer=null,lastImportError=null;
+for(const url of ['https://esm.sh/@webcontainer/api@1.6.4','https://cdn.jsdelivr.net/npm/@webcontainer/api@1.6.4/+esm']){
+  try{const mod=await importWithTimeout(url);if(typeof mod?.WebContainer==='function'){WebContainer=mod.WebContainer;break}}catch(e){lastImportError=String(e?.message||e);statusEl.textContent='IMPORT_RETRY'}
+}
+if(!WebContainer){window.__result={candidate:Number(new URLSearchParams(location.search).get('c')),ok:false,timeout:false,error:'WEBCONTAINER_IMPORT_FAILED:'+String(lastImportError||'unknown')};resultEl.textContent=JSON.stringify(window.__result,null,2);statusEl.textContent='IMPORT_ERROR';window.__done=true;throw new Error(window.__result.error)}
 
 async function collect(proc){let out='';const r=proc.output.getReader();for(;;){const x=await r.read();if(x.done)break;out+=x.value;if(out.length>8192)out=out.slice(-8192)}return out}
 
@@ -97,10 +111,12 @@ async function probe(c,label){
   }
   r.label=label; r.host_elapsed_ms=Date.now()-started; probes.push(r);
   console.log('ZEIBAEL_CAPABILITY_PROBE='+JSON.stringify({profile:PROFILE,...r}));
+  await postEvidence('boundary_probe',c,{profile:PROFILE,label,ok:r.ok===true,timeout:r.timeout===true,elapsed_ms:r.elapsed_ms??null,host_elapsed_ms:r.host_elapsed_ms,completed:r.completed??null,failed:r.failed??null,error:r.error||r.host_error||null});
   await page.close().catch(()=>{});
   return r;
 }
 
+await postEvidence('begin',0,{profile:PROFILE,config:P,confirm_rounds:CONFIRM_ROUNDS});
 let low=0, high=null, c=1;
 while(c<=P.hard_cap){
   const r=await probe(c,'exponential');
@@ -145,5 +161,6 @@ if(low===P.hard_cap && high===null){
 }
 
 console.log('ZEIBAEL_CAPABILITY_RESULT='+JSON.stringify(result));
+await postEvidence('final',Number(result.safe_max||result.burst_max||result.last_stable_observed||0),{profile:PROFILE,status:result.status,safe_max:result.safe_max??null,burst_max:result.burst_max??null,first_fail:result.first_fail??null,last_stable_observed:result.last_stable_observed??null,config:P,benchmark_id:benchmarkId});
 await browser.close(); server.close();
 process.exit(result.status==='EXACT'||result.status==='LOWER_BOUND_ONLY'?0:2);
