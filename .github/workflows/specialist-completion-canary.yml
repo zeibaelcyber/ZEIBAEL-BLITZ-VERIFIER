@@ -1,0 +1,50 @@
+name: ZEIBAEL Specialist Completion Canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/specialist-completion-canary.yml"
+      - "scripts/specialist-completion-canary.mcp.json"
+      - "scripts/specialist-completion-canary.mjs"
+      - "scripts/zeibael_k6_loadtest_mcp.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.17"
+      - name: Install pinned Trivy MCP and k6 binaries
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/zeibael-specialists
+          curl -fsSL https://github.com/aquasecurity/trivy-mcp/releases/download/v0.0.20/trivy-mcp-linux-amd64.tar.gz -o /tmp/trivy-mcp.tgz
+          echo "5168a3da88af9f39b12096e2686416f09f306b7320559b757fe5fca0d5d8e468  /tmp/trivy-mcp.tgz" | sha256sum -c -
+          tar -xzf /tmp/trivy-mcp.tgz -C /tmp/zeibael-specialists
+          chmod +x /tmp/zeibael-specialists/trivy-mcp
+
+          curl -fsSL https://github.com/grafana/k6/releases/download/v2.2.0/k6-v2.2.0-linux-amd64.tar.gz -o /tmp/k6.tgz
+          echo "b5a8003c86f35f5cd5ceef1490312c48e587696c94d998cefc6d7b3b4cb1597d  /tmp/k6.tgz" | sha256sum -c -
+          mkdir -p /tmp/k6-extract
+          tar -xzf /tmp/k6.tgz -C /tmp/k6-extract
+          cp /tmp/k6-extract/k6-v2.2.0-linux-amd64/k6 /tmp/zeibael-specialists/k6
+          chmod +x /tmp/zeibael-specialists/k6
+          /tmp/zeibael-specialists/k6 version
+      - name: Start dummy localhost target
+        run: |
+          mkdir -p /tmp/zeibael-http
+          printf 'ZEIBAEL_LOCAL_DUMMY_OK\n' > /tmp/zeibael-http/index.html
+          python3 -m http.server 18080 --bind 127.0.0.1 --directory /tmp/zeibael-http >/tmp/zeibael-http.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18080/ >/dev/null && break; sleep 1; done
+      - name: Run non-intrusive specialist canary
+        run: node scripts/specialist-completion-canary.mjs
