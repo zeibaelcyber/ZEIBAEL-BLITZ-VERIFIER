@@ -85,9 +85,18 @@ jobs:
           set -euo pipefail
           export OPENCLAW_STATE_DIR="$RUNNER_TEMP/openclaw-state"
           export NO_PROXY=127.0.0.1,localhost
+          export OPENCLAW_GATEWAY_TOKEN="$(openssl rand -hex 24)"
+          openclaw config set gateway.auth.mode token
+          openclaw config set gateway.auth.token "$OPENCLAW_GATEWAY_TOKEN"
           openclaw gateway run --port 18789 >"$RUNNER_TEMP/openclaw-gateway.log" 2>&1 &
           echo $! >"$RUNNER_TEMP/openclaw-gateway.pid"
-          for i in $(seq 1 45); do if openclaw gateway status >/dev/null 2>&1; then break; fi; sleep 1; done
+          ready=0
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:18789/healthz >/dev/null 2>&1; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = "1"
+          curl -fsS http://127.0.0.1:18789/healthz | tee "$RUNNER_TEMP/gateway-healthz.txt"
           openclaw gateway status | tee "$RUNNER_TEMP/gateway-status.txt"
           timeout 90s openclaw agent --agent main --message 'Return exactly ZEIBAEL_OPENCLAW_STRICT_CANARY_PASS and nothing else. Do not call tools.' --model zeibael-local/canary-model --json >"$RUNNER_TEMP/openclaw-agent.json"
           cat "$RUNNER_TEMP/openclaw-agent.json"
