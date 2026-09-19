@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent-fallback-runtime-canary-v1
+      - openclaw-full-runtime-proof-v1
       - main
     paths:
       - '.github/workflows/agent-fallback-runtime-canary.yml'
