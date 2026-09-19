@@ -56,7 +56,7 @@ def _conn() -> duckdb.DuckDBPyConnection:
             expr = f"read_csv_auto({src})"
         else:
             expr = f"read_json_auto({src})"
-        con.execute(f"CREATE VIEW {_qident(name)} AS SELECT * FROM {expr}")
+        con.execute(f"CREATE TABLE {_qident(name)} AS SELECT * FROM {expr}")
     con.execute("SET enable_external_access=false")
     con.execute("SET autoinstall_known_extensions=false")
     con.execute("SET autoload_known_extensions=false")
