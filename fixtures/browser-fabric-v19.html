@@ -163,6 +163,7 @@ async function hydrateKernelFiles(c,root){
         top_keys:Object.keys(snapTree||{}).slice(0,12),
         top_shapes:Object.fromEntries(Object.entries(snapTree||{}).slice(0,12).map(([k,v])=>[k,v&&typeof v==='object'?Object.keys(v).slice(0,6):typeof v]))
       });
+      await c.fs.mkdir(mountPoint,{recursive:true});
       await c.mount(snapTree,{mountPoint});
       let repaired=false;
       try{
