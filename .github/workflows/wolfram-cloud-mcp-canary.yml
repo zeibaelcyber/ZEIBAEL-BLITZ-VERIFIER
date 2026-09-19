@@ -1,0 +1,28 @@
+name: ZEIBAEL Wolfram Cloud MCP Canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/wolfram-cloud-mcp-canary.yml"
+      - "scripts/wolfram-cloud-canary.mcp.json"
+      - "scripts/wolfram-cloud-canary.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Install exact MCP SDK client
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund --save-exact @modelcontextprotocol/sdk@1.26.0
+      - name: Run no-secret Wolfram Cloud MCP canary
+        run: node scripts/wolfram-cloud-canary.mjs
