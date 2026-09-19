@@ -36,3 +36,11 @@ A verification run emits a JSON evidence document with:
 - deterministic evidence id
 
 A task should only be called VERIFIED when all required checks pass in a fresh run.
+
+## Deterministic internal advisor kernel
+
+The verifier includes a zero-network deterministic advisor kernel inside the smart compiler. It performs plan compaction and prevalidation without calling OpenClaw, Hermes, or any model provider.
+
+When OpenClaw/Hermes planner metadata is present but their runtime is not verified, they are explicitly bypassed. The local kernel still deduplicates safe jobs, removes redundant transitive dependency edges, validates the DAG, measures critical-path/layer width, counts external/mutating HTTP jobs, and emits an immutable SHA-256 packet fingerprint.
+
+OpenClaw/Hermes never receive execution authority from this path. Setting `advisory_only=false` fails closed. `live_order_enabled=true` remains forbidden.
