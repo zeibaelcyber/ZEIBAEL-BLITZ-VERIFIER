@@ -280,6 +280,7 @@ function normalizeTasks(tasks){
   })
 }
 window.zeibaelProbe=()=>({coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,hardwareConcurrency:navigator.hardwareConcurrency||null,deviceMemory:navigator.deviceMemory||null,ua:navigator.userAgent,status:status.textContent,l1_cache_entries:resultCache.size,l2_cache:'INDEXEDDB_FAIL_OPEN',max_concurrency:MAX_CONCURRENCY,kernel_alive:kernelAlive,kernel_starts:kernelStarts,kernel_restarts:kernelRestarts,snapshot_hits:snapshotHits,snapshot_misses:snapshotMisses,snapshot_writes:snapshotWrites,event_count:runtimeEvents.length});
+window.zeibaelEnsureCacheDb=async()=>Boolean(await openCacheDb());
 window.zeibaelEvents=()=>runtimeEvents.slice();
 window.zeibaelClearL1Cache=()=>{const before=resultCache.size;resultCache.clear();return before};
 window.zeibaelResetRuntime=async()=>{resetKernelState('manual_reset');if(fabricWatcher){try{fabricWatcher.close()}catch{}fabricWatcher=null}if(wc){try{wc.teardown()}catch{}}wc=null;bootPromise=null;eventListenersInstalled=false;status.textContent='READY_LAZY';return {ok:true}};
