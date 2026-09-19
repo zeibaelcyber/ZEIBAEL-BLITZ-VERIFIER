@@ -1,0 +1,29 @@
+{
+  "mcpServers": {
+    "duckdb": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--with",
+        "fastmcp==4.0.5",
+        "--with",
+        "duckdb==1.5.5",
+        "python",
+        "scripts/zeibael_duckdb_analytics_mcp.py"
+      ],
+      "env": {
+        "ZEIBAEL_DUCKDB_DATA_DIR": "canary-data",
+        "ZEIBAEL_DUCKDB_MAX_ROWS": "100"
+      }
+    },
+    "redis": {
+      "command": "bash",
+      "args": [
+        "scripts/run_redis_mcp.sh"
+      ],
+      "env": {
+        "ZEIBAEL_REDIS_URL": "redis://127.0.0.1:6379/0"
+      }
+    }
+  }
+}
