@@ -3,10 +3,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import {
+  DEFAULT_SYSTEM_HEALTH_CACHE_TTL_MS,
+  isSafeSystemHealthPayload,
+  readSystemHealthCache,
+  writeSystemHealthCache,
+} from './system-health-cache.mjs';
 
 const started = Date.now();
 const ZEIBAEL_SYSTEM_HEALTH_URL = process.env.ZEIBAEL_SYSTEM_HEALTH_URL ||
-  'https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-blitz-health';
+  'https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-blitz-health?mode=fast';
+const ZEIBAEL_SYSTEM_HEALTH_CACHE_TTL_MS = Math.max(
+  1,
+  Number(process.env.ZEIBAEL_SYSTEM_HEALTH_CACHE_TTL_MS || DEFAULT_SYSTEM_HEALTH_CACHE_TTL_MS),
+);
 
 function failWithDetail(message, detail) {
   const error = new Error(message);
@@ -31,6 +41,27 @@ async function fetchJson(url, ms = 10000) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function fetchSystemHealthCached() {
+  const cached = await readSystemHealthCache(ZEIBAEL_SYSTEM_HEALTH_URL, {
+    ttlMs: ZEIBAEL_SYSTEM_HEALTH_CACHE_TTL_MS,
+  });
+  if (cached) {
+    const parsed = new URL(ZEIBAEL_SYSTEM_HEALTH_URL);
+    return {
+      response: { ok: true, status: 200 },
+      payload: cached.payload,
+      origin: parsed.origin,
+      cache_hit: true,
+      cache_age_ms: cached.age_ms,
+    };
+  }
+  const fetched = await fetchJson(ZEIBAEL_SYSTEM_HEALTH_URL);
+  if (fetched.response.ok && isSafeSystemHealthPayload(fetched.payload)) {
+    await writeSystemHealthCache(ZEIBAEL_SYSTEM_HEALTH_URL, fetched.payload).catch(() => false);
+  }
+  return { ...fetched, cache_hit: false, cache_age_ms: null };
 }
 
 async function runCheck(name, fn, { required = true } = {}) {
@@ -102,7 +133,7 @@ const jobs = [
   }),
 
   () => runCheck('zeibael.system_health', async () => {
-    const { response, payload, origin } = await fetchJson(ZEIBAEL_SYSTEM_HEALTH_URL);
+    const { response, payload, origin, cache_hit, cache_age_ms } = await fetchSystemHealthCached();
     const systemChecks = Array.isArray(payload?.checks)
       ? payload.checks.map(item => ({ name: item?.name, ok: item?.ok, required: item?.required, detail: item?.detail }))
       : [];
@@ -117,6 +148,9 @@ const jobs = [
       checks: systemChecks,
       secrets_exposed: payload?.secrets_exposed,
       live_order_enabled: payload?.live_order_enabled,
+      health_cache_hit: cache_hit === true,
+      health_cache_age_ms: cache_age_ms,
+      health_cache_ttl_ms: ZEIBAEL_SYSTEM_HEALTH_CACHE_TTL_MS,
     };
     if (!response.ok || payload?.ok !== true) failWithDetail(`ZEIBAEL health HTTP ${response.status}`, safeDetail);
     if (payload.secrets_exposed !== false) failWithDetail('Health contract did not assert secrets_exposed=false', safeDetail);
@@ -139,7 +173,7 @@ const status = requiredFailures.length === 0 ? 'VERIFIED' : 'FAILED';
 const baseEvidence = {
   schema: 'zeibael.verifier.evidence.v4',
   status,
-  execution_mode: 'MAX_PARALLEL',
+  execution_mode: 'MAX_PARALLEL_BOUNDED_HEALTH_REUSE',
   calibration_disabled: true,
   independent_jobs_started_in_parallel: jobs.length,
   generated_at: new Date().toISOString(),
