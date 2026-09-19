@@ -365,6 +365,71 @@ async function prewarmRuntime(){
   });
   return runtimePrewarmPromise
 }
+async function benchmarkPrewarmOrder(opts={}){
+  const repeats=Math.max(2,Math.min(5,Number(opts?.repeats)||3));
+  const samples=[];
+  const median=(rows,key)=>{
+    const xs=rows.map(x=>Number(x?.[key])).filter(Number.isFinite).sort((a,b)=>a-b);
+    if(!xs.length)return null;
+    const m=Math.floor(xs.length/2);
+    return xs.length%2?xs[m]:(xs[m-1]+xs[m])/2
+  };
+  await snapshotSet('warm-kernel-v1',{'kernel.mjs':{file:{contents:WARM_KERNEL_SOURCE}}});
+  async function cycle(mode,tag){
+    await window.zeibaelResetRuntime();
+    const totalStarted=performance.now();
+    const bootStarted=performance.now();
+    const c=await boot();
+    const boot_ms=Math.round((performance.now()-bootStarted)*100)/100;
+    let fs_probe_ms=0;
+    if(mode==='PROBE_FIRST'){
+      const fsStarted=performance.now();
+      const root='/zeibael-prewarm-bench-'+tag;
+      await c.fs.mkdir(root,{recursive:true});
+      await c.fs.writeFile(root+'/probe','1');
+      const readback=await c.fs.readFile(root+'/probe','utf8');
+      if(readback!=='1')throw new Error('PREWARM_ORDER_FS_ROUNDTRIP_FAILED');
+      try{await c.fs.rm(root,{recursive:true,force:true})}catch{}
+      fs_probe_ms=Math.round((performance.now()-fsStarted)*100)/100
+    }
+    const kernelStarted=performance.now();
+    await ensureKernel(c);
+    const kernel_ms=Math.round((performance.now()-kernelStarted)*100)/100;
+    const taskStarted=performance.now();
+    const task=await kernelExecuteWithRecovery(c,{id:'prewarm-order-'+tag,code:'console.log(42)',timeout_ms:2000});
+    const first_task_ms=Math.round((performance.now()-taskStarted)*100)/100;
+    return {
+      mode,tag,ok:task?.ok===true,
+      boot_ms,fs_probe_ms,kernel_ms,first_task_ms,
+      worker_elapsed_ms:Number(task?.elapsed_ms),
+      worker_mode:task?.worker_mode||null,
+      total_ms:Math.round((performance.now()-totalStarted)*100)/100
+    }
+  }
+  for(let i=0;i<repeats;i++){
+    const order=i%2===0?['PROBE_FIRST','KERNEL_FIRST']:['KERNEL_FIRST','PROBE_FIRST'];
+    for(const mode of order)samples.push(await cycle(mode,(i+1)+'-'+mode.toLowerCase()))
+  }
+  await window.zeibaelResetRuntime();
+  const probe=samples.filter(x=>x.mode==='PROBE_FIRST');
+  const kernel=samples.filter(x=>x.mode==='KERNEL_FIRST');
+  return {
+    ok:samples.length===repeats*2&&samples.every(x=>x.ok===true)&&probe.length===repeats&&kernel.length===repeats,
+    repeats,samples,
+    medians:{
+      probe_first_total_ms:median(probe,'total_ms'),
+      kernel_first_total_ms:median(kernel,'total_ms'),
+      probe_first_boot_ms:median(probe,'boot_ms'),
+      kernel_first_boot_ms:median(kernel,'boot_ms'),
+      probe_first_kernel_ms:median(probe,'kernel_ms'),
+      kernel_first_kernel_ms:median(kernel,'kernel_ms'),
+      probe_first_task_ms:median(probe,'first_task_ms'),
+      kernel_first_task_ms:median(kernel,'first_task_ms'),
+      probe_only_fs_ms:median(probe,'fs_probe_ms')
+    }
+  }
+}
+window.zeibaelBenchmarkPrewarmOrder=benchmarkPrewarmOrder;
 async function collect(proc){
   let out='';const r=proc.output.getReader();
   for(;;){const x=await r.read();if(x.done)break;out+=x.value;if(out.length>131072)out=out.slice(-131072)}
