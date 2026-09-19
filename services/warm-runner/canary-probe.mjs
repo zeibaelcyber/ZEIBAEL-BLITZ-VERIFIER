@@ -18,14 +18,15 @@ async function waitHealth(){
   }
   throw new Error("health_timeout:"+JSON.stringify(last));
 }
-async function burst(tasks){
+async function burst(tasks,concurrency=2,workloadProfile="LIGHT"){
   return await getJson("/burst",{
     method:"POST",
     headers:{authorization:"Bearer "+token,"content-type":"application/json"},
     body:JSON.stringify({
       route:{execution_class:"LOCAL_BLITZ",broker_required:false},
       tasks,
-      concurrency:2,
+      concurrency,
+      workload_profile:workloadProfile,
       live_order_enabled:false
     })
   });
@@ -39,6 +40,12 @@ try{
   ];
   const first=await burst(tasks);
   const second=await burst(tasks.map((t,i)=>({...t,id:i===0?"a2":"b2"})));
+  const governorNegative=await burst([
+    {id:"g-ok-1",code:"console.log(1)",kernel_safe:true,cache_safe:false,timeout_ms:1000},
+    {id:"g-ok-2",code:"console.log(2)",kernel_safe:true,cache_safe:false,timeout_ms:1000},
+    {id:"g-ok-3",code:"console.log(3)",kernel_safe:true,cache_safe:false,timeout_ms:1000},
+    {id:"g-timeout",code:"await new Promise(()=>{})",kernel_safe:true,cache_safe:false,timeout_ms:500}
+  ],4,"LIGHT");
   const broker=await getJson("/burst",{
     method:"POST",
     headers:{authorization:"Bearer "+token,"content-type":"application/json"},
@@ -54,6 +61,15 @@ try{
     h1.ready===true &&
     first.status===200 && first.body?.ok===true && Number(first.body?.executed)===2 &&
     second.status===200 && second.body?.ok===true && Number(second.body?.executed)===0 && Number(second.body?.cache?.hits)===2 &&
+    governorNegative.status===422 && governorNegative.body?.ok===false &&
+    governorNegative.body?.adaptive_governor?.enabled===true &&
+    governorNegative.body?.adaptive_governor?.downshifted===true &&
+    Number(governorNegative.body?.adaptive_governor?.initial_concurrency)===4 &&
+    Number(governorNegative.body?.adaptive_governor?.retry_concurrency)===2 &&
+    Number(governorNegative.body?.adaptive_governor?.retried_tasks)===1 &&
+    Number(governorNegative.body?.adaptive_governor?.recovered_tasks)===0 &&
+    Number(governorNegative.body?.executed)===4 &&
+    Number(governorNegative.body?.attempts)===5 &&
     h1.kernel_pid!=null && h1.kernel_pid===h2.kernel_pid &&
     broker.status===200 && broker.body?.status==="BROKER_REQUIRED" && broker.body?.executed===false &&
     h2.ready===true && h2.runner==="ZEIBAEL_BLITZ_WARM_RUNNER_V2" && Number(h2.restarts)===0 &&
@@ -65,6 +81,7 @@ try{
     pid_reused:h1.kernel_pid===h2.kernel_pid,
     first:first.body,
     second:second.body,
+    adaptive_governor_negative_control:governorNegative.body,
     broker:broker.body,
     health:h2,
     canonical_state:"SUPABASE",
