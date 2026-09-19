@@ -84,6 +84,7 @@ try{
     Number(coalesceProbe.body?.attempts)===1 &&
     Number(coalesceProbe.body?.cache?.coalesced)===3 &&
     first.body?.results?.every(x=>x.worker_mode==="PREWARMED_ONE_SHOT_WORKER") &&
+    first.body?.results?.every(x=>Number(x.elapsed_ms)<=100) &&
     h1.prewarmed_one_shot_workers===true &&
     Number(h1.prewarm_pool?.target)>=1 &&
     slotProbe.status===200 && slotProbe.body?.ok===true &&
@@ -91,6 +92,7 @@ try{
     Number(slotProbe.body?.cache?.coalesced)===1 &&
     slotUniqueBeforeLeader===true &&
     h2.slot_preserving_coalescing===true &&
+    Number(h2.prewarm_pool?.cold_fallbacks)===0 &&
     governorNegative.status===422 && governorNegative.body?.ok===false &&
     governorNegative.body?.adaptive_governor?.enabled===true &&
     governorNegative.body?.adaptive_governor?.downshifted===true &&
@@ -115,6 +117,8 @@ try{
     prewarmed_one_shot_workers:{
       ok:first.body?.results?.every(x=>x.worker_mode==="PREWARMED_ONE_SHOT_WORKER")===true,
       first_task_elapsed_ms:first.body?.results?.map(x=>x.elapsed_ms)||[],
+      max_first_task_ms:100,
+      no_cold_fallbacks:Number(h2.prewarm_pool?.cold_fallbacks)===0,
       pool:h2.prewarm_pool||h1.prewarm_pool||null
     },
     slot_preserving_coalescing:{
