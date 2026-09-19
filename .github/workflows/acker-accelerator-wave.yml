@@ -31,6 +31,6 @@ jobs:
         with:
           node-version: '24'
       - name: Install browser harness
-        run: npm install --no-save --no-package-lock puppeteer@24.16.0
+        run: npm install --no-save --no-package-lock puppeteer@24.16.0 @webcontainer/api@1.6.4
       - name: Run accelerator probe
         run: node scripts/blitz-accelerator-probe.mjs
