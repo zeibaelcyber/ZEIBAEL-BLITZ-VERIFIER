@@ -199,6 +199,21 @@ async function browserCanary() {
       Number(hydrationMedians.snapshot_fresh_ms) <= 10 &&
       Number(hydrationMedians.cold_direct_first_mutation_ms) <= Number(hydrationMedians.cold_snapshot_first_mutation_ms) * 1.15;
     if(!hydrationLatencyGate) throw new Error("FS_HYDRATION_LATENCY_REGRESSION:"+JSON.stringify(hydrationMedians));
+    stage = "runtime-prewarm";
+    await window.zeibaelResetRuntime();
+    const runtimePrewarm = await window.zeibaelPrewarm();
+    if(runtimePrewarm?.ok !== true) throw new Error("RUNTIME_PREWARM_FAILED:"+JSON.stringify(runtimePrewarm));
+    const postPrewarmRun = await window.zeibaelRun({
+      tasks:[{id:"prewarm-first-task",code:"console.log(40+2)",cache_safe:false,kernel_safe:true,timeout_ms:2000}],
+      concurrency:1,
+      workload_profile:"LIGHT"
+    });
+    const postPrewarmRow = postPrewarmRun?.results?.[0] || null;
+    const runtimePrewarmGate =
+      postPrewarmRun?.ok === true &&
+      postPrewarmRow?.worker_mode === "PREWARMED_ONE_SHOT_WORKER" &&
+      Number(postPrewarmRow?.elapsed_ms) <= 150;
+    if(!runtimePrewarmGate) throw new Error("RUNTIME_PREWARM_LATENCY_REGRESSION:"+JSON.stringify({runtimePrewarm,postPrewarmRow}));
     stage = "idb-init";
     const cacheDbReady = await window.zeibaelEnsureCacheDb();
     if(cacheDbReady !== true) throw new Error("CACHE_DB_INIT_FAILED");
@@ -294,6 +309,7 @@ async function browserCanary() {
     fsHydrationBenchmark?.ok === true &&
     Number(fsHydrationBenchmark?.repeats) >= 3 &&
     hydrationLatencyGate === true &&
+    runtimePrewarmGate === true &&
     idb.ok === true &&
     watchStart?.ok === true &&
     writeRun?.ok === true &&
@@ -316,6 +332,12 @@ async function browserCanary() {
     stage: "complete",
     probe: initial,
     fs_hydration_benchmark: fsHydrationBenchmark,
+    runtime_prewarm: {
+      ok: runtimePrewarmGate,
+      prewarm: runtimePrewarm,
+      first_task: postPrewarmRow,
+      first_task_max_ms: 150
+    },
     hydration_fast_path: {
       selected: "DIRECT_WRITE",
       selection_basis: "REPEATED_REAL_HOST_MEDIAN",
@@ -376,7 +398,7 @@ chrome.stderr.on("data", d => {
 let cdp;
 try {
   await waitJson("http://127.0.0.1:" + DEBUG_PORT + "/json/version", 20000);
-  const targetUrl = "http://127.0.0.1:" + PORT + "/";
+  const targetUrl = "http://127.0.0.1:" + PORT + "/?zeibael_canary=1";
   const targetResp = await fetch("http://127.0.0.1:" + DEBUG_PORT + "/json/new?" + encodeURIComponent(targetUrl), { method: "PUT" });
   if (!targetResp.ok) throw new Error("CDP_NEW_TARGET_HTTP_" + targetResp.status);
   const target = await targetResp.json();
@@ -389,7 +411,7 @@ try {
   let lastState = null;
   while (Date.now() - readyStarted < 45000) {
     const r = await runtimeEvaluateWhenContextReady(cdp, {
-      expression: 'JSON.stringify({ready:typeof window.zeibaelProbe==="function"&&typeof window.zeibaelEnsureCacheDb==="function"&&typeof window.zeibaelBenchmarkHydration==="function"&&typeof window.zeibaelWatch==="function"&&typeof window.zeibaelRun==="function"&&typeof window.zeibaelExportDigest==="function"&&typeof window.zeibaelRunEnvelope==="function"&&typeof window.zeibaelResetRuntime==="function",status:document.getElementById("status")?.textContent||null,coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,apis:{cacheDb:typeof window.zeibaelEnsureCacheDb,benchmark:typeof window.zeibaelBenchmarkHydration,watch:typeof window.zeibaelWatch,run:typeof window.zeibaelRun,exportDigest:typeof window.zeibaelExportDigest,envelope:typeof window.zeibaelRunEnvelope,reset:typeof window.zeibaelResetRuntime}})',
+      expression: 'JSON.stringify({ready:typeof window.zeibaelProbe==="function"&&typeof window.zeibaelEnsureCacheDb==="function"&&typeof window.zeibaelBenchmarkHydration==="function"&&typeof window.zeibaelPrewarm==="function"&&typeof window.zeibaelWatch==="function"&&typeof window.zeibaelRun==="function"&&typeof window.zeibaelExportDigest==="function"&&typeof window.zeibaelRunEnvelope==="function"&&typeof window.zeibaelResetRuntime==="function",status:document.getElementById("status")?.textContent||null,coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,apis:{cacheDb:typeof window.zeibaelEnsureCacheDb,benchmark:typeof window.zeibaelBenchmarkHydration,prewarm:typeof window.zeibaelPrewarm,watch:typeof window.zeibaelWatch,run:typeof window.zeibaelRun,exportDigest:typeof window.zeibaelExportDigest,envelope:typeof window.zeibaelRunEnvelope,reset:typeof window.zeibaelResetRuntime}})',
       returnByValue: true,
     }, 5000);
     if (typeof r?.result?.value === "string") {
