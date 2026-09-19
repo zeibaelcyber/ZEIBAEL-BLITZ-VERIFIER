@@ -64,7 +64,7 @@ async function ensureKernel(){
       failPending(new Error("KERNEL_EXIT_"+code));
       if(wasReady)restarts++;
     });
-    await Promise.race([readyP,new Promise((_,reject)=>setTimeout(()=>reject(new Error("KERNEL_READY_TIMEOUT")),5000))]);
+    await Promise.race([readyP,new Promise((_,reject)=>setTimeout(()=>reject(new Error("KERNEL_READY_TIMEOUT")),8000))]);
     const pong=await callRaw({command:"ping"},3000);
     kernelPid=pong.pid||null;
     kernelPrewarm=pong.prewarm||null;
