@@ -24,7 +24,7 @@ jobs:
           version: "0.12.17"
       - name: Start local Redis
         run: |
-          docker run -d --rm --name zeibael-redis-canary -p 6379:6379 redis:8.2.10-alpine
+          docker run -d --rm --name zeibael-redis-canary -p 6379:6379 redis:8.2-alpine
           for i in $(seq 1 30); do docker exec zeibael-redis-canary redis-cli ping | grep -q PONG && break; sleep 1; done
       - name: Run specialist MCP canary
         run: node scripts/supabase-specialists-canary.mjs
