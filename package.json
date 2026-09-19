@@ -29,6 +29,6 @@
   },
   "stackblitz": {
     "installDependencies": false,
-    "startCommand": "npm run warm-kernel:selftest"
+    "startCommand": "npm run smart:one-shot"
   }
 }
