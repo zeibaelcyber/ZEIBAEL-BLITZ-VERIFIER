@@ -228,7 +228,11 @@ async function browserCanary() {
   const eventsAfterSecond = window.zeibaelEvents().slice(-32);
 
   const ok =
-    initial.max_concurrency === 57 &&
+    initial.max_concurrency === 64 &&
+    initial.profile_caps?.LIGHT === 17 &&
+    initial.profile_caps?.IO === 23 &&
+    initial.profile_caps?.BUILD_TEST === 25 &&
+    initial.profile_caps?.CPU_HEAVY === 39 &&
     idb.ok === true &&
     watchStart?.ok === true &&
     writeRun?.ok === true &&
