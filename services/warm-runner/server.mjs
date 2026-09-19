@@ -12,7 +12,7 @@ const PROVEN_WORKER_CEILING=1791,DEFAULT_MAX_CONCURRENCY=64,HARD_TASK_CEILING=40
 const MAX_CONCURRENCY=Math.max(1,Math.min(PROVEN_WORKER_CEILING,Number(process.env.ZEIBAEL_MAX_CONCURRENCY)||DEFAULT_MAX_CONCURRENCY));
 const MAX_TASKS=Math.max(1,Math.min(HARD_TASK_CEILING,Number(process.env.ZEIBAEL_MAX_TASKS)||DEFAULT_MAX_TASKS));
 const MAX_CODE_BYTES=64*1024,MAX_TOTAL_CODE_BYTES=8*1024*1024,MAX_BODY_BYTES=10*1024*1024;
-const PROFILE_CAPS=Object.freeze({LIGHT:17,IO:23,BUILD_TEST:24,CPU_HEAVY:32});
+const PROFILE_CAPS=Object.freeze({LIGHT:17,IO:23,BUILD_TEST:25,CPU_HEAVY:32});
 function profileCap(value){
   const p=String(value||'').toUpperCase();
   return {profile:Object.prototype.hasOwnProperty.call(PROFILE_CAPS,p)?p:'GENERIC',cap:Object.prototype.hasOwnProperty.call(PROFILE_CAPS,p)?PROFILE_CAPS[p]:MAX_CONCURRENCY};
