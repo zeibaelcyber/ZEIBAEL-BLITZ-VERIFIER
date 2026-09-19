@@ -26,6 +26,8 @@ const MAX_CONCURRENCY=64,MAX_TASKS=4096,MAX_CODE_BYTES=65536,MAX_TOTAL_CODE_BYTE
 const PROFILE_CAPS=Object.freeze({LIGHT:18,IO:29,BUILD_TEST:32,CPU_HEAVY:39});
 function profileCap(value){const p=String(value||'').toUpperCase();return{profile:Object.prototype.hasOwnProperty.call(PROFILE_CAPS,p)?p:'GENERIC',cap:Object.prototype.hasOwnProperty.call(PROFILE_CAPS,p)?PROFILE_CAPS[p]:MAX_CONCURRENCY}}
 let wc=null,bootPromise=null,runSeq=0,bootCount=0,lastBootMs=null,runtimePrewarmPromise=null,runtimePrewarmStats=null;
+let coldProcessPrimeTimer=null,coldProcessPrimePromise=null,coldProcessPrimeProc=null,coldProcessPrimeGeneration=0;
+let coldProcessPrimeStats={ok:false,state:'IDLE',elapsed_ms:null,prime_pid:null,process_exited:false,reason:null};
 const WARM_KERNEL_SOURCE="import { Worker } from \"node:worker_threads\";\nimport readline from \"node:readline\";\nconst rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});\nconst MAX_OUTPUT=6000;\nconst PREWARM_TARGET=Math.max(2,Math.min(8,Number(process.env.ZEIBAEL_KERNEL_PREWARM)||8));\nconst PREWARM_READY_TARGET=Math.max(2,Math.min(PREWARM_TARGET,Number(process.env.ZEIBAEL_KERNEL_READY_PREWARM)||2));\nconst PREPARE_TIMEOUT_MS=5000;\nconst idle=[],preparedWaiters=[];\nlet preparing=0,poolSpawned=0,poolUses=0,poolColdFallbacks=0,poolReplenishments=0,poolWaitedForReplenish=0;\nconst BOOTSTRAP=`\nimport { parentPort } from \"node:worker_threads\";\nparentPort.once(\"message\", async (msg) => {\n  let ok=true,error=null;\n  try {\n    const code=String(msg?.code||\"\");\n    const url=new URL(\"data:text/javascript;base64,\"+Buffer.from(code,\"utf8\").toString(\"base64\"));\n    await import(url.href);\n  } catch (e) {\n    ok=false;\n    error=String(e&&e.stack||e&&e.message||e);\n  }\n  await new Promise(r=>setImmediate(r));\n  parentPort.postMessage({type:\"done\",ok,error});\n});\nparentPort.postMessage({type:\"ready\"});\n`;\nconst BOOTSTRAP_URL=new URL(\"data:text/javascript;base64,\"+Buffer.from(BOOTSTRAP,\"utf8\").toString(\"base64\"));\nfunction trim(s){return String(s||\"\").slice(-MAX_OUTPUT)}\nfunction poolState(){return {target:PREWARM_TARGET,ready_target:PREWARM_READY_TARGET,ready:idle.length,preparing,waiters:preparedWaiters.length,spawned:poolSpawned,prewarmed_uses:poolUses,cold_fallbacks:poolColdFallbacks,replenishments:poolReplenishments,waited_for_replenish:poolWaitedForReplenish}}\nfunction offerPrepared(worker){\n  const waiter=preparedWaiters.shift();\n  if(waiter){waiter.resolve(worker);return}\n  if(idle.length<PREWARM_TARGET)idle.push(worker);\n  else try{void worker.terminate().catch(()=>{})}catch{}\n}\nasync function waitForPrepared(){\n  if(idle.length)return idle.pop();\n  if(preparing<1)return null;\n  poolWaitedForReplenish++;\n  return await new Promise(resolve=>{\n    const entry={resolve:(worker)=>{clearTimeout(timer);resolve(worker)}};\n    const timer=setTimeout(()=>{\n      const i=preparedWaiters.indexOf(entry);if(i>=0)preparedWaiters.splice(i,1);\n      resolve(null)\n    },PREPARE_TIMEOUT_MS+1000);\n    preparedWaiters.push(entry)\n  })\n}\nfunction spawnPrepared(){\n  preparing++;poolSpawned++;\n  return new Promise((resolve,reject)=>{\n    const worker=new Worker(BOOTSTRAP_URL,{type:\"module\",stdout:true,stderr:true});\n    let settled=false;\n    const timer=setTimeout(()=>{\n      if(settled)return;settled=true;\n      try{worker.terminate()}catch{}\n      reject(new Error(\"PREWARM_READY_TIMEOUT\"));\n    },PREPARE_TIMEOUT_MS);\n    const fail=(error)=>{\n      if(settled)return;settled=true;clearTimeout(timer);\n      reject(error instanceof Error?error:new Error(String(error)));\n    };\n    worker.once(\"error\",fail);\n    worker.once(\"exit\",code=>{if(!settled)fail(new Error(\"PREWARM_EXIT_\"+code))});\n    worker.on(\"message\",msg=>{\n      if(settled||msg?.type!==\"ready\")return;\n      settled=true;clearTimeout(timer);resolve(worker);\n    });\n  }).finally(()=>{preparing--})\n}\nfunction scheduleReplenish(){\n  while(idle.length+preparing<PREWARM_TARGET){\n    poolReplenishments++;\n    void spawnPrepared().then(offerPrepared).catch(()=>{});\n  }\n}\nasync function initializePool(){\n  const rows=await Promise.allSettled(Array.from({length:PREWARM_READY_TARGET},()=>spawnPrepared()));\n  for(const row of rows)if(row.status===\"fulfilled\")offerPrepared(row.value);\n  scheduleReplenish();\n}\nasync function acquireWorker(){\n  let worker=idle.pop();\n  if(worker){\n    poolUses++;\n    scheduleReplenish();\n    return {worker,prewarmed:true};\n  }\n  if(preparing>0){\n    worker=await waitForPrepared();\n    if(worker){\n      poolUses++;\n      scheduleReplenish();\n      return {worker,prewarmed:true};\n    }\n  }\n  poolColdFallbacks++;\n  const cold=await spawnPrepared();\n  scheduleReplenish();\n  return {worker:cold,prewarmed:false};\n}\nasync function execute(req){\n  const started=performance.now(),code=String(req.code||\"\");\n  const timeout=Math.max(100,Math.min(30000,Number(req.timeout_ms)||10000));\n  if(!code)return {request_id:req.request_id,id:req.id,ok:false,exit_code:2,elapsed_ms:0,error:\"empty_code\",output:\"\",worker_mode:\"NONE\",prewarm:poolState()};\n  let acquired;\n  try{acquired=await acquireWorker()}\n  catch(e){return {request_id:req.request_id,id:req.id,ok:false,exit_code:1,elapsed_ms:Math.round(performance.now()-started),error:\"WORKER_ACQUIRE_FAILED:\"+trim(e&&e.stack||e),output:\"\",worker_mode:\"ACQUIRE_FAILED\",prewarm:poolState()}}\n  const {worker,prewarmed}=acquired;\n  return await new Promise((resolve)=>{\n    let out=\"\",err=\"\",done=false;\n    if(worker.stdout)worker.stdout.on(\"data\",c=>{out=trim(out+c.toString())});\n    if(worker.stderr)worker.stderr.on(\"data\",c=>{err=trim(err+c.toString())});\n    const finish=(ok,exitCode,error)=>{\n      if(done)return;done=true;clearTimeout(timer);\n      const elapsed=Math.round(performance.now()-started);\n      setImmediate(()=>{\n        try{void worker.terminate().catch(()=>{})}catch{}\n        resolve({\n          request_id:req.request_id,id:req.id,ok,exit_code:exitCode,elapsed_ms:elapsed,\n          output:trim(out+(err?((out?\"\\n\":\"\")+err):\"\")),\n          error:error?trim(error):undefined,\n          worker_mode:prewarmed?\"PREWARMED_ONE_SHOT_WORKER\":\"ON_DEMAND_ONE_SHOT_WORKER\",\n          prewarm:poolState()\n        });\n      });\n    };\n    const timer=setTimeout(()=>finish(false,124,\"timeout\"),timeout);\n    worker.once(\"error\",e=>finish(false,1,e&&e.stack||e&&e.message||String(e)));\n    worker.once(\"exit\",code=>finish(false,Number(code)||1,\"worker_exit_before_done_\"+code));\n    worker.on(\"message\",msg=>{\n      if(msg?.type!==\"done\")return;\n      finish(msg.ok===true,msg.ok===true?0:1,msg.error||undefined);\n    });\n    try{worker.postMessage({code})}\n    catch(e){finish(false,1,e&&e.stack||e&&e.message||String(e))}\n  })\n}\nasync function handle(line){\n  let req;try{req=JSON.parse(line)}catch{process.stdout.write(\"ZK1:\"+JSON.stringify({request_id:null,ok:false,error:\"invalid_json\"})+\"\\n\");return}\n  if(req&&req.command===\"ping\"){process.stdout.write(\"ZK1:\"+JSON.stringify({request_id:req.request_id,ok:true,pong:true,pid:process.pid,prewarm:poolState()})+\"\\n\");return}\n  const result=await execute(req||{});process.stdout.write(\"ZK1:\"+JSON.stringify(result)+\"\\n\")\n}\nawait initializePool();\nrl.on(\"line\",line=>{void handle(line)});\nprocess.stdout.write(\"ZK1_READY\\n\");\n";
 let kernelPromise=null,kernelProc=null,kernelWriter=null,kernelAlive=false,kernelSeq=0,kernelStarts=0,kernelRestarts=0,kernelBuffer="",kernelReadyResolve=null,kernelReadyReject=null;
 const kernelPending=new Map(),runtimeEvents=[];
@@ -351,6 +353,77 @@ async function boot(){
   }
   return bootPromise
 }
+async function cancelColdProcessPrime(reason='cold_task_arrived'){
+  coldProcessPrimeGeneration++;
+  if(coldProcessPrimeTimer){clearTimeout(coldProcessPrimeTimer);coldProcessPrimeTimer=null}
+  const proc=coldProcessPrimeProc;
+  coldProcessPrimeProc=null;
+  if(proc){
+    try{proc.kill()}catch{}
+    try{await Promise.race([proc.exit,new Promise(resolve=>setTimeout(resolve,400))])}catch{}
+  }
+  coldProcessPrimePromise=null;
+  coldProcessPrimeStats={...coldProcessPrimeStats,ok:false,state:'CANCELLED',process_exited:true,reason};
+  pushRuntimeEvent('cold_process_prime_cancelled',{reason});
+  return coldProcessPrimeStats
+}
+async function primeColdProcess(){
+  if(coldProcessPrimeStats?.state==='READY'||coldProcessPrimeStats?.state==='TASK_WARMED')return coldProcessPrimeStats;
+  if(coldProcessPrimePromise)return coldProcessPrimePromise;
+  if(coldProcessPrimeTimer){clearTimeout(coldProcessPrimeTimer);coldProcessPrimeTimer=null}
+  const generation=++coldProcessPrimeGeneration;
+  coldProcessPrimeStats={ok:false,state:'RUNNING',elapsed_ms:null,prime_pid:null,process_exited:false,reason:'IDLE_SEQUENTIAL_PRIME'};
+  coldProcessPrimePromise=(async()=>{
+    const started=performance.now();
+    try{
+      const c=await boot();
+      const proc=await c.spawn('node',['-e','console.log(process.pid)']);
+      if(generation!==coldProcessPrimeGeneration){try{proc.kill()}catch{};return coldProcessPrimeStats}
+      coldProcessPrimeProc=proc;
+      const output=await collect(proc);
+      const exit=await proc.exit;
+      const pid=Number(String(output||'').trim().split(/\s+/).pop())||null;
+      if(generation!==coldProcessPrimeGeneration)return coldProcessPrimeStats;
+      coldProcessPrimeStats={
+        ok:exit===0,
+        state:exit===0?'READY':'FAILED',
+        elapsed_ms:Math.round((performance.now()-started)*100)/100,
+        prime_pid:pid,
+        process_exited:true,
+        exit_code:exit,
+        reason:exit===0?'IDLE_SEQUENTIAL_PRIME_COMPLETE':'IDLE_PRIME_EXIT_'+exit
+      };
+      pushRuntimeEvent('cold_process_prime',coldProcessPrimeStats);
+      return coldProcessPrimeStats
+    }catch(e){
+      if(generation===coldProcessPrimeGeneration){
+        coldProcessPrimeStats={ok:false,state:'FAILED',elapsed_ms:Math.round((performance.now()-started)*100)/100,prime_pid:null,process_exited:true,reason:String(e?.message||e)};
+        pushRuntimeEvent('cold_process_prime_failed',coldProcessPrimeStats)
+      }
+      return coldProcessPrimeStats
+    }finally{
+      if(generation===coldProcessPrimeGeneration){
+        coldProcessPrimeProc=null;
+        coldProcessPrimePromise=null
+      }
+    }
+  })();
+  return coldProcessPrimePromise
+}
+function scheduleColdProcessPrime(delay=250){
+  if(['READY','TASK_WARMED','RUNNING','SCHEDULED'].includes(String(coldProcessPrimeStats?.state||'')))return coldProcessPrimeStats;
+  const delayMs=Math.max(100,Math.min(5000,Number(delay)||250));
+  coldProcessPrimeStats={...coldProcessPrimeStats,state:'SCHEDULED',reason:'IDLE_DELAY'};
+  coldProcessPrimeTimer=setTimeout(()=>{coldProcessPrimeTimer=null;void primeColdProcess()},delayMs);
+  pushRuntimeEvent('cold_process_prime_scheduled',{delay_ms:delayMs});
+  return coldProcessPrimeStats
+}
+async function resetColdProcessPrime(reason='runtime_reset'){
+  await cancelColdProcessPrime(reason);
+  coldProcessPrimeStats={ok:false,state:'IDLE',elapsed_ms:null,prime_pid:null,process_exited:false,reason};
+  return coldProcessPrimeStats
+}
+
 async function prewarmRuntime(){
   if(runtimePrewarmPromise)return runtimePrewarmPromise;
   runtimePrewarmPromise=(async()=>{
@@ -369,6 +442,7 @@ async function prewarmRuntime(){
       kernel_starts:kernelStarts
     };
     pushRuntimeEvent('runtime_prewarm',runtimePrewarmStats);
+    if(new URLSearchParams(location.search).get('zeibael_canary')!=='1')scheduleColdProcessPrime(250);
     return runtimePrewarmStats
   })().catch(e=>{
     runtimePrewarmStats={ok:false,error:String(e?.message||e)};
@@ -479,11 +553,13 @@ function normalizeTasks(tasks){
     return{id,code,cache_safe:t?.cache_safe===true,kernel_safe:t?.kernel_safe===true,cache_ttl_ms:Number(t?.cache_ttl_ms)||null,timeout_ms:Math.max(500,Math.min(30000,Number(t?.timeout_ms)||10000))}
   })
 }
-window.zeibaelProbe=()=>({coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,hardwareConcurrency:navigator.hardwareConcurrency||null,deviceMemory:navigator.deviceMemory||null,ua:navigator.userAgent,status:status.textContent,l1_cache_entries:resultCache.size,l2_cache:'INDEXEDDB_FAIL_OPEN',max_concurrency:MAX_CONCURRENCY,profile_caps:PROFILE_CAPS,max_tasks:MAX_TASKS,max_total_code_bytes:MAX_TOTAL_CODE_BYTES,kernel_alive:kernelAlive,kernel_starts:kernelStarts,kernel_restarts:kernelRestarts,snapshot_hits:snapshotHits,snapshot_misses:snapshotMisses,snapshot_writes:snapshotWrites,snapshot_bypasses:snapshotBypasses,hydration_fast_path:'DIRECT_WRITE',boot_count:bootCount,last_boot_ms:lastBootMs,runtime_prewarm:runtimePrewarmStats,event_count:runtimeEvents.length});
+window.zeibaelProbe=()=>({coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,hardwareConcurrency:navigator.hardwareConcurrency||null,deviceMemory:navigator.deviceMemory||null,ua:navigator.userAgent,status:status.textContent,l1_cache_entries:resultCache.size,l2_cache:'INDEXEDDB_FAIL_OPEN',max_concurrency:MAX_CONCURRENCY,profile_caps:PROFILE_CAPS,max_tasks:MAX_TASKS,max_total_code_bytes:MAX_TOTAL_CODE_BYTES,kernel_alive:kernelAlive,kernel_starts:kernelStarts,kernel_restarts:kernelRestarts,snapshot_hits:snapshotHits,snapshot_misses:snapshotMisses,snapshot_writes:snapshotWrites,snapshot_bypasses:snapshotBypasses,hydration_fast_path:'DIRECT_WRITE',boot_count:bootCount,last_boot_ms:lastBootMs,runtime_prewarm:runtimePrewarmStats,cold_process_prime:coldProcessPrimeStats,event_count:runtimeEvents.length});
 window.zeibaelEvents=()=>runtimeEvents.slice();
 window.zeibaelPrewarm=prewarmRuntime;
+window.zeibaelPrimeColdProcess=primeColdProcess;
+window.zeibaelScheduleColdProcessPrime=scheduleColdProcessPrime;
 window.zeibaelClearL1Cache=()=>{const before=resultCache.size;resultCache.clear();return before};
-window.zeibaelResetRuntime=async()=>{resetKernelState('manual_reset');if(fabricWatcher){try{fabricWatcher.close()}catch{}fabricWatcher=null}if(wc){try{wc.teardown()}catch{}}wc=null;bootPromise=null;runtimePrewarmPromise=null;runtimePrewarmStats=null;eventListenersInstalled=false;status.textContent='READY_LAZY';return {ok:true}};
+window.zeibaelResetRuntime=async()=>{await resetColdProcessPrime('runtime_reset');resetKernelState('manual_reset');if(fabricWatcher){try{fabricWatcher.close()}catch{}fabricWatcher=null}if(wc){try{wc.teardown()}catch{}}wc=null;bootPromise=null;runtimePrewarmPromise=null;runtimePrewarmStats=null;eventListenersInstalled=false;status.textContent='READY_LAZY';return {ok:true}};
 
 function benchMs(started){return Math.round((performance.now()-started)*100)/100}
 function benchMedian(values){
@@ -726,6 +802,8 @@ window.zeibaelRunEnvelope=async(envelope)=>{
 };
 window.zeibaelRun=async({tasks,concurrency,cache_ttl_ms,workload_profile}={})=>{
   const started=performance.now(),normalized=normalizeTasks(tasks);
+  const hasColdTask=normalized.some(t=>t.kernel_safe!==true);
+  if(hasColdTask&&['SCHEDULED','RUNNING'].includes(String(coldProcessPrimeStats?.state||'')))await cancelColdProcessPrime('cold_task_arrived');
   pruneCache();
   const persistentPrune=await prunePersistentCache().catch(()=>({available:false,deleted:0,skipped:false}));
   const cacheMeta=await Promise.all(normalized.map(async t=>({key:await cacheKey(t),task:t})));
@@ -823,6 +901,7 @@ window.zeibaelRun=async({tasks,concurrency,cache_ttl_ms,workload_profile}={})=>{
       const coldN=Math.max(1,Math.min(n,coldMisses.length));
       await Promise.all(Array.from({length:coldN},coldWorker));
       try{await c.fs.rm(runRoot,{recursive:true,force:true})}catch{}
+      coldProcessPrimeStats={...coldProcessPrimeStats,ok:true,state:'TASK_WARMED',process_exited:true,reason:'ACTUAL_COLD_TASK_COMPLETED'};
     }
     const persisted=await idbSetMany(persistentPending);
     persistentWrites=persisted.writes;persistentWriteTransactions=persisted.transactions;
