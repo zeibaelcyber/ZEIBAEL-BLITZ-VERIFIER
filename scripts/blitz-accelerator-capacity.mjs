@@ -12,7 +12,19 @@ const WC_DIST = path.resolve(__dirname, "../node_modules/@webcontainer/api/dist"
 const PORT = 4182;
 const STARTUP_TIMEOUT_MS = 45000;
 const STEP_TIMEOUT_MS = 30000;
-const CANDIDATES = [1,2,4,8,16,24,32,48,64,96,128,192,256,384,512,768,1024,1280,1536,1791];
+const CANDIDATES = [1,4,16,64,256,1024,1791];
+const EVIDENCE_URL = "https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-blitz-worker-evidence";
+const BENCHMARK_ID = "blitz-accelerator-capacity-" + (process.env.GITHUB_RUN_ID || Date.now());
+async function postEvidence(event, worker_n, payload) {
+  try {
+    const r = await fetch(EVIDENCE_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ benchmark_id: BENCHMARK_ID, event, worker_n, payload })
+    });
+    return r.ok;
+  } catch { return false; }
+}
 
 const html = `<!doctype html><meta charset="utf-8"><title>ZEIBAEL Blitz Adaptive Capacity</title>
 <pre id="status">HOST_READY</pre>
@@ -183,29 +195,32 @@ try{
     }));
     process.exitCode=2;
   }else{
-    async function probe(c,label){
+    async function probe(c,label,countMultiplier=1){
       const t0=Date.now();
       let result;
+      const count=Math.max(c,Math.min(4096,Math.floor(c*countMultiplier)));
       try{
-        result=await page.evaluate(async({c,timeout})=>{
+        result=await page.evaluate(async({c,count,timeout})=>{
           let timer;
           try{
             return await Promise.race([
-              window.zeibaelRun({count:c,concurrency:c}),
+              window.zeibaelRun({count,concurrency:c}),
               new Promise((_,rej)=>timer=setTimeout(()=>rej(new Error("STEP_TIMEOUT")),timeout))
             ]);
           }finally{clearTimeout(timer)}
-        },{c,timeout:STEP_TIMEOUT_MS});
-        result={candidate:c,ok:result?.ok===true,timeout:false,...result,label,host_elapsed_ms:Date.now()-t0};
+        },{c,count,timeout:STEP_TIMEOUT_MS});
+        result={candidate:c,count,ok:result?.ok===true,timeout:false,...result,label,host_elapsed_ms:Date.now()-t0};
       }catch(e){
         const msg=String(e?.message||e);
-        result={candidate:c,ok:false,timeout:msg.includes("STEP_TIMEOUT"),host_error:msg,label,host_elapsed_ms:Date.now()-t0};
+        result={candidate:c,count,ok:false,timeout:msg.includes("STEP_TIMEOUT"),host_error:msg,label,host_elapsed_ms:Date.now()-t0};
       }
       probes.push(result);
+      await postEvidence("attempt",c,result);
       console.log("ZEIBAEL_ACCELERATOR_PROBE="+JSON.stringify(result));
       return result;
     }
 
+    await postEvidence("begin",0,{candidates:CANDIDATES,step_timeout_ms:STEP_TIMEOUT_MS});
     let low=0,high=null;
     for(const c of CANDIDATES){
       const r=await probe(c,"ramp");
@@ -231,18 +246,21 @@ try{
         const r=await probe(mid,"binary");
         if(r.ok)low=mid;else high=mid;
       }
-      const confirmGood=await probe(low,"confirm_pass");
-      const confirmBad=await probe(high,"confirm_fail");
+      const confirmGood=await probe(low,"confirm_pass_sustained",2);
+      const confirmBad=await probe(high,"confirm_fail",1);
       const exact=confirmGood.ok&&!confirmBad.ok&&high===low+1;
-      console.log("ZEIBAEL_ACCELERATOR_RESULT="+JSON.stringify({
-        schema:"zeibael.blitz.accelerator-capacity.v3",
+      const finalResult={
+        schema:"zeibael.blitz.accelerator-capacity.v4",
         status:exact?"EXACT_BOUNDARY_CONFIRMED":"VARIABLE_BOUNDARY",
         max_stable_parallel_slots:exact?low:null,
         first_timeout_or_fail:exact?high:null,
         safe_operating_slots:Math.max(1,Math.floor(low*0.9)),
+        sustained_confirmation_count:confirmGood.count,
         worker_thread_ceiling_reference:1791,
         probes
-      }));
+      };
+      await postEvidence("final",Number(finalResult.safe_operating_slots||low),finalResult);
+      console.log("ZEIBAEL_ACCELERATOR_RESULT="+JSON.stringify(finalResult));
       if(!exact)process.exitCode=2;
     }
   }
