@@ -1,0 +1,31 @@
+name: Blitz MCP Accelerator Runtime Canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/blitz-mcp-accelerator-runtime-canary.yml"
+      - "scripts/blitz-mcp-accelerator-canary.mjs"
+      - "scripts/blitz-mcp-accelerator-canary.mcp.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Record browser host
+        run: |
+          (google-chrome --version || google-chrome-stable --version || chromium --version || true)
+      - name: Run zero-spend MCP accelerator canary
+        run: node scripts/blitz-mcp-accelerator-canary.mjs
