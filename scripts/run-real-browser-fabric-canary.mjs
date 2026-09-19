@@ -31,10 +31,13 @@ try {
   }
 } catch {}
 
-const moduleMatch = html.match(/<script type="module">([\\s\\S]*?)<\\/script>/i);
-if (!moduleMatch) throw new Error("BROWSER_FABRIC_MODULE_SCRIPT_MISSING");
+const moduleMarker = '<script type="module">';
+const moduleStart = html.indexOf(moduleMarker);
+const moduleEnd = moduleStart >= 0 ? html.indexOf('</script>', moduleStart + moduleMarker.length) : -1;
+if (moduleStart < 0 || moduleEnd < 0) throw new Error("BROWSER_FABRIC_MODULE_SCRIPT_MISSING");
+const moduleSource = html.slice(moduleStart + moduleMarker.length, moduleEnd);
 const syntaxPath = "/tmp/zeibael-browser-fabric-" + process.pid + ".mjs";
-await writeFile(syntaxPath, moduleMatch[1], "utf8");
+await writeFile(syntaxPath, moduleSource, "utf8");
 const syntax = spawnSync(process.execPath, ["--check", syntaxPath], { encoding: "utf8" });
 if (syntax.status !== 0) {
   throw new Error("BROWSER_FABRIC_SYNTAX_INVALID:" + String(syntax.stderr || syntax.stdout || "unknown").slice(-4000));
