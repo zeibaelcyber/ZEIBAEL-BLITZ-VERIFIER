@@ -70,7 +70,8 @@ const server = http.createServer((req, res) => {
   res.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
   res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
   res.setHeader("Cache-Control", "no-store");
-  if (req.url === "/" || req.url === "/index.html") {
+  const pathname = new URL(req.url || "/", "http://127.0.0.1").pathname;
+  if (pathname === "/" || pathname === "/index.html") {
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.end(html);
