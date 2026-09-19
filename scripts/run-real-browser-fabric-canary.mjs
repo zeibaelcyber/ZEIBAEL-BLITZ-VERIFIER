@@ -186,6 +186,19 @@ async function browserCanary() {
     stage = "fs-hydration-benchmark";
     const fsHydrationBenchmark = await window.zeibaelBenchmarkHydration({ repeats: 3 });
     if(fsHydrationBenchmark?.ok !== true) throw new Error("FS_HYDRATION_BENCHMARK_FAILED");
+    const hydrationMedians = fsHydrationBenchmark?.medians || {};
+    const coldSeries = Array.isArray(fsHydrationBenchmark?.cold_series) ? fsHydrationBenchmark.cold_series : [];
+    const coldDirectSamples = coldSeries.filter(x => x?.primary_mode === "DIRECT_WRITE").length;
+    const coldSnapshotSamples = coldSeries.filter(x => x?.primary_mode === "SNAPSHOT_MOUNT").length;
+    const hydrationLatencyGate =
+      coldDirectSamples >= 3 &&
+      coldSnapshotSamples >= 3 &&
+      Number(hydrationMedians.cold_direct_first_mutation_ms) <= 900 &&
+      Number(hydrationMedians.cold_snapshot_first_mutation_ms) <= 900 &&
+      Number(hydrationMedians.direct_fresh_ms) <= 10 &&
+      Number(hydrationMedians.snapshot_fresh_ms) <= 10 &&
+      Number(hydrationMedians.cold_direct_first_mutation_ms) <= Number(hydrationMedians.cold_snapshot_first_mutation_ms) * 1.15;
+    if(!hydrationLatencyGate) throw new Error("FS_HYDRATION_LATENCY_REGRESSION:"+JSON.stringify(hydrationMedians));
     stage = "idb-init";
     const cacheDbReady = await window.zeibaelEnsureCacheDb();
     if(cacheDbReady !== true) throw new Error("CACHE_DB_INIT_FAILED");
@@ -280,6 +293,7 @@ async function browserCanary() {
     initial.profile_caps?.CPU_HEAVY === 39 &&
     fsHydrationBenchmark?.ok === true &&
     Number(fsHydrationBenchmark?.repeats) >= 3 &&
+    hydrationLatencyGate === true &&
     idb.ok === true &&
     watchStart?.ok === true &&
     writeRun?.ok === true &&
@@ -302,6 +316,17 @@ async function browserCanary() {
     stage: "complete",
     probe: initial,
     fs_hydration_benchmark: fsHydrationBenchmark,
+    hydration_fast_path: {
+      selected: "DIRECT_WRITE",
+      selection_basis: "REPEATED_REAL_HOST_MEDIAN",
+      latency_gate_ok: hydrationLatencyGate,
+      cold_direct_samples: coldDirectSamples,
+      cold_snapshot_samples: coldSnapshotSamples,
+      medians: hydrationMedians,
+      max_cold_first_mutation_ms: 900,
+      max_warm_materialization_ms: 10,
+      direct_vs_snapshot_tolerance_ratio: 1.15
+    },
     idb_sanity: idb,
     snapshot: { after_first: afterFirst, after_second: afterSecond, events_after_first: eventsAfterFirst, events_after_second: eventsAfterSecond },
     watch: {
