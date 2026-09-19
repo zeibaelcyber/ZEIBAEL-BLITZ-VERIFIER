@@ -1,0 +1,24 @@
+name: ZEIBAEL Filesystem MCP Canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/filesystem-mcp-canary.yml"
+      - "scripts/filesystem-canary.mcp.json"
+      - "scripts/filesystem-canary.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Run scoped Filesystem MCP canary
+        run: node scripts/filesystem-canary.mjs
