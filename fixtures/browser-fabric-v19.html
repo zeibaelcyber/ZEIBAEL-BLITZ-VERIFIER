@@ -713,6 +713,68 @@ window.zeibaelExportDigest=async({path='/',format='json'}={})=>{
   pushRuntimeEvent('export_digest',{path,format,bytes:raw.byteLength,sha256});
   return {ok:true,path,format,bytes:raw.byteLength,sha256}
 };
+window.zeibaelBenchmarkColdSpawn=async({repeats=3}={})=>{
+  const count=Math.max(2,Math.min(5,Number(repeats)||3));
+  const c=await boot();
+  const rows=[];
+  const ms=t=>Math.round((performance.now()-t)*100)/100;
+  const median=(xs)=>{
+    const a=xs.filter(Number.isFinite).sort((x,y)=>x-y);
+    if(!a.length)return null;
+    const m=Math.floor(a.length/2);
+    return a.length%2?a[m]:(a[m-1]+a[m])/2
+  };
+  async function spawnOnce(root,label){
+    const totalStarted=performance.now();
+    const spawnStarted=performance.now();
+    const p=await c.spawn('node',['task.mjs'],{cwd:root});
+    const spawn_ms=ms(spawnStarted);
+    const processStarted=performance.now();
+    const output=await collect(p);
+    const exit=await p.exit;
+    const process_ms=ms(processStarted);
+    return {label,ok:exit===0,exit_code:exit,spawn_ms,process_ms,total_ms:ms(totalStarted),output:String(output||'').trim().slice(-200)}
+  }
+  for(let i=0;i<count;i++){
+    const root='/zeibael-cold-spawn-bench/'+Date.now()+'-'+i;
+    const totalStarted=performance.now();
+    const mkdirStarted=performance.now();
+    await c.fs.mkdir(root,{recursive:true});
+    const mkdir_ms=ms(mkdirStarted);
+    const mountStarted=performance.now();
+    await c.mount({'task.mjs':{file:{contents:'console.log("cold-spawn-ok")'}}},{mountPoint:root.startsWith('/')?root.slice(1):root});
+    const mount_ms=ms(mountStarted);
+    const first=await spawnOnce(root,'first');
+    const second=await spawnOnce(root,'second');
+    const cleanupStarted=performance.now();
+    try{await c.fs.rm(root,{recursive:true,force:true})}catch{}
+    const cleanup_ms=ms(cleanupStarted);
+    rows.push({round:i+1,ok:first.ok&&second.ok,mkdir_ms,mount_ms,first,second,cleanup_ms,total_ms:ms(totalStarted)})
+  }
+  const first=rows.map(x=>x.first),second=rows.map(x=>x.second);
+  const evidence={
+    schema:'zeibael.blitz.cold-spawn-benchmark.v1',
+    ok:rows.length===count&&rows.every(x=>x.ok===true),
+    repeats:count,
+    rows,
+    medians:{
+      mkdir_ms:median(rows.map(x=>x.mkdir_ms)),
+      mount_ms:median(rows.map(x=>x.mount_ms)),
+      first_spawn_ms:median(first.map(x=>x.spawn_ms)),
+      first_process_ms:median(first.map(x=>x.process_ms)),
+      first_total_ms:median(first.map(x=>x.total_ms)),
+      second_spawn_ms:median(second.map(x=>x.spawn_ms)),
+      second_process_ms:median(second.map(x=>x.process_ms)),
+      second_total_ms:median(second.map(x=>x.total_ms)),
+      cleanup_ms:median(rows.map(x=>x.cleanup_ms)),
+      round_total_ms:median(rows.map(x=>x.total_ms))
+    },
+    canonical_state:'SUPABASE',
+    live_order_enabled:false
+  };
+  pushRuntimeEvent('cold_spawn_benchmark',{ok:evidence.ok,medians:evidence.medians,repeats:count});
+  return evidence
+};
 window.zeibaelRunEnvelope=async(envelope)=>{
   if(!envelope||envelope.schema!=='zeibael.blitz.route.v2')throw new Error('invalid_route_schema');
   if(envelope.live_order_enabled===true)throw new Error('live_order_forbidden');
