@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "trivy": {
+      "command": "/tmp/zeibael-specialists/trivy-mcp",
+      "args": [
+        "--transport",
+        "stdio",
+        "--use-aqua-platform=false"
+      ]
+    },
+    "k6": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--with",
+        "fastmcp==4.0.5",
+        "python",
+        "scripts/zeibael_k6_loadtest_mcp.py"
+      ],
+      "env": {
+        "ZEIBAEL_K6_BIN": "/tmp/zeibael-specialists/k6",
+        "ZEIBAEL_K6_ALLOWED_ORIGINS": "http://127.0.0.1:18080",
+        "ZEIBAEL_K6_MAX_VUS": "2",
+        "ZEIBAEL_K6_MAX_DURATION_SECONDS": "5"
+      }
+    }
+  }
+}
