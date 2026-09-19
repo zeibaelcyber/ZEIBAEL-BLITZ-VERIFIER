@@ -13,6 +13,11 @@ const MAX_TOTAL_CODE_BYTES = 256 * 1024;
 const MAX_BODY_BYTES = 512 * 1024;
 const MAX_OUTPUT_BYTES = 32 * 1024;
 const DEFAULT_TASK_TIMEOUT_MS = 15_000;
+const PROFILE_CAPS = Object.freeze({ LIGHT: 17, IO: 23, BUILD_TEST: 24, CPU_HEAVY: 32 });
+function profileCap(value) {
+  const p = String(value || '').toUpperCase();
+  return { profile: Object.prototype.hasOwnProperty.call(PROFILE_CAPS, p) ? p : 'GENERIC', cap: Object.prototype.hasOwnProperty.call(PROFILE_CAPS, p) ? PROFILE_CAPS[p] : MAX_CONCURRENCY };
+}
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -94,10 +99,11 @@ function normalizeTasks(body) {
   return normalized;
 }
 
-function clampConcurrency(value, taskCount) {
+function clampConcurrency(value, taskCount, workloadProfile) {
+  const selected = profileCap(workloadProfile);
   const n = Number(value);
-  if (!Number.isFinite(n)) return Math.min(taskCount, MAX_CONCURRENCY);
-  return Math.max(1, Math.min(taskCount, Math.floor(n), MAX_CONCURRENCY));
+  const requested = Number.isFinite(n) ? Math.floor(n) : taskCount;
+  return { concurrency: Math.max(1, Math.min(taskCount, requested, MAX_CONCURRENCY, selected.cap)), selected };
 }
 
 function truncateBuffer(buffer) {
@@ -205,6 +211,7 @@ const server = http.createServer(async (req, res) => {
       max_concurrency: MAX_CONCURRENCY,
       proven_worker_ceiling: PROVEN_WORKER_CEILING,
       adaptive_concurrency: true,
+      profile_caps: PROFILE_CAPS,
       max_code_bytes: MAX_CODE_BYTES,
       max_total_code_bytes: MAX_TOTAL_CODE_BYTES
     });
@@ -218,7 +225,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const body = await readJson(req);
     const tasks = normalizeTasks(body);
-    const concurrency = clampConcurrency(body?.concurrency, tasks.length);
+    const { concurrency, selected } = clampConcurrency(body?.concurrency, tasks.length, body?.workload_profile);
     const results = await runPool(tasks, concurrency);
 
     return sendJson(res, 200, {
@@ -232,6 +239,8 @@ const server = http.createServer(async (req, res) => {
       requested_concurrency: Number(body?.concurrency) || null,
       actual_concurrency: concurrency,
       max_concurrency: MAX_CONCURRENCY,
+      workload_profile: selected.profile,
+      profile_cap: selected.cap,
       compute_elapsed_ms: Date.now() - started,
       results
     });
