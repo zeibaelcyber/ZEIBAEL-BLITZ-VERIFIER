@@ -197,7 +197,8 @@ async function browserCanary() {
     const runtimePrewarmGate =
       runtimePrewarm?.strategy === "KERNEL_FIRST" &&
       runtimePrewarm?.fs_probe_bypassed === true &&
-      Number(runtimePrewarm?.total_ms) <= 2500 &&
+      Number(runtimePrewarm?.kernel_ms) <= 2200 &&
+      Number(runtimePrewarm?.total_ms) <= 3200 &&
       postPrewarmRun?.ok === true &&
       postPrewarmRow?.worker_mode === "PREWARMED_ONE_SHOT_WORKER" &&
       Number(postPrewarmRow?.elapsed_ms) <= 150;
@@ -209,6 +210,26 @@ async function browserCanary() {
       ["SOURCE_WRITE","SNAPSHOT_BYPASS_SOURCE_WRITE"].includes(String(selectedHydration?.source || "")) &&
       Number(selectedHydration?.total_ms) <= 900;
     if(!selectedHydrationGate) throw new Error("SELECTED_HYDRATION_REGRESSION:"+JSON.stringify(selectedHydration));
+    stage = "cold-process-prime-runtime";
+    const coldProcessPrime = await window.zeibaelPrimeColdProcess();
+    const coldPrimeRun = await window.zeibaelRun({
+      tasks:[{id:"cold-prime-runtime-task",code:"console.log(process.pid)",cache_safe:false,kernel_safe:false,timeout_ms:3000}],
+      concurrency:1,
+      workload_profile:"LIGHT"
+    });
+    const coldPrimeRow = coldPrimeRun?.results?.[0] || null;
+    const coldPrimeTaskPid = Number(String(coldPrimeRow?.output||"").trim().split(/\s+/).pop()) || null;
+    const coldPrimeRuntimeGate =
+      coldProcessPrime?.ok === true &&
+      coldProcessPrime?.state === "READY" &&
+      coldProcessPrime?.process_exited === true &&
+      Number.isFinite(Number(coldProcessPrime?.prime_pid)) &&
+      Number.isFinite(coldPrimeTaskPid) &&
+      Number(coldProcessPrime.prime_pid) !== coldPrimeTaskPid &&
+      coldPrimeRun?.ok === true &&
+      coldPrimeRow?.execution_mode === "COLD_SPAWN" &&
+      Number(coldPrimeRow?.elapsed_ms) <= 800;
+    if(!coldPrimeRuntimeGate) throw new Error("COLD_PROCESS_PRIME_RUNTIME_REGRESSION:"+JSON.stringify({coldProcessPrime,coldPrimeRow,coldPrimeTaskPid}));
     stage = "idb-init";
     const cacheDbReady = await window.zeibaelEnsureCacheDb();
     if(cacheDbReady !== true) throw new Error("CACHE_DB_INIT_FAILED");
@@ -309,6 +330,7 @@ async function browserCanary() {
     initial.profile_caps?.CPU_HEAVY === 39 &&
     selectedHydrationGate === true &&
     runtimePrewarmGate === true &&
+    coldPrimeRuntimeGate === true &&
     coldSpawnRegressionGate === true &&
     idb.ok === true &&
     watchStart?.ok === true &&
@@ -335,16 +357,31 @@ async function browserCanary() {
       exploratory_ab_retired_from_per_commit_canary: true,
       evidence_source: "CANONICAL_SUPABASE_REAL_HOST_SENTINELS",
       hydration: {selected:"DIRECT_WRITE",probe:selectedHydration,max_ms:900,ok:selectedHydrationGate},
-      prewarm: {selected:"KERNEL_FIRST",no_process_prime:true,inline_kernel:"REJECTED_REAL_HOST_READY_TIMEOUT"},
+      prewarm: {
+        selected:"KERNEL_FIRST",
+        cold_process_prime:"IDLE_SEQUENTIAL_EXIT_BEFORE_TASK",
+        overlap_prime:"REJECTED_REAL_HOST_CONTENTION",
+        inline_kernel:"REJECTED_REAL_HOST_READY_TIMEOUT"
+      },
       cold_spawn: {max_ms:1500,ok:coldSpawnRegressionGate,row:coldSpawnRow}
     },
     runtime_prewarm: {
       ok: runtimePrewarmGate,
       strategy: "KERNEL_FIRST",
       prewarm: runtimePrewarm,
-      total_max_ms: 2500,
+      kernel_max_ms: 2200,
+      total_max_ms: 3200,
       first_task: postPrewarmRow,
       first_task_max_ms: 150
+    },
+    cold_process_prime_runtime: {
+      ok: coldPrimeRuntimeGate,
+      prime: coldProcessPrime,
+      task: coldPrimeRow,
+      task_pid: coldPrimeTaskPid,
+      distinct_pid: Number(coldProcessPrime?.prime_pid) !== coldPrimeTaskPid,
+      max_task_ms: 800,
+      isolation: "PRIME_PROCESS_EXITED__TASK_PROCESS_DISTINCT_PID"
     },
     hydration_fast_path: {
       selected: "DIRECT_WRITE",
