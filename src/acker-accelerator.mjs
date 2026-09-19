@@ -26,9 +26,9 @@ const WEBCONTAINER_SAFE_PARALLEL_SLOTS =
     : DEFAULT_WEBCONTAINER_SAFE_PARALLEL_SLOTS;
 const DEFAULT_CACHE_TTL_MS = 10 * 60 * 1000;
 const WORKLOAD_CAPS = Object.freeze({
-  LIGHT: 17,
-  IO: 23,
-  BUILD_TEST: 25,
+  LIGHT: 18,
+  IO: 29,
+  BUILD_TEST: 32,
   CPU_HEAVY: 39
 });
 function workloadProfile(job) {
