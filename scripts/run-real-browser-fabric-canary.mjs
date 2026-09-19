@@ -202,6 +202,10 @@ async function browserCanary() {
     stage = "prewarm-order-benchmark";
     const prewarmOrderBenchmark = await window.zeibaelBenchmarkPrewarmOrder({ repeats: 3 });
     if(prewarmOrderBenchmark?.ok !== true) throw new Error("PREWARM_ORDER_BENCHMARK_FAILED:"+JSON.stringify(prewarmOrderBenchmark));
+    const prewarmOrderMedians = prewarmOrderBenchmark?.medians || {};
+    const kernelFirstSelectionGate =
+      Number(prewarmOrderMedians.kernel_first_total_ms) <= Number(prewarmOrderMedians.probe_first_total_ms) * 1.10;
+    if(!kernelFirstSelectionGate) throw new Error("KERNEL_FIRST_PREWARM_REGRESSION:"+JSON.stringify(prewarmOrderMedians));
     stage = "runtime-prewarm";
     await window.zeibaelResetRuntime();
     const runtimePrewarm = await window.zeibaelPrewarm();
@@ -213,6 +217,9 @@ async function browserCanary() {
     });
     const postPrewarmRow = postPrewarmRun?.results?.[0] || null;
     const runtimePrewarmGate =
+      runtimePrewarm?.strategy === "KERNEL_FIRST" &&
+      runtimePrewarm?.fs_probe_bypassed === true &&
+      Number(runtimePrewarm?.total_ms) <= 2500 &&
       postPrewarmRun?.ok === true &&
       postPrewarmRow?.worker_mode === "PREWARMED_ONE_SHOT_WORKER" &&
       Number(postPrewarmRow?.elapsed_ms) <= 150;
@@ -335,10 +342,17 @@ async function browserCanary() {
     stage: "complete",
     probe: initial,
     fs_hydration_benchmark: fsHydrationBenchmark,
-    prewarm_order_benchmark: prewarmOrderBenchmark,
+    prewarm_order_benchmark: {
+      ...prewarmOrderBenchmark,
+      selected: "KERNEL_FIRST",
+      selection_gate_ok: kernelFirstSelectionGate,
+      selection_tolerance_ratio: 1.10
+    },
     runtime_prewarm: {
       ok: runtimePrewarmGate,
+      strategy: "KERNEL_FIRST",
       prewarm: runtimePrewarm,
+      total_max_ms: 2500,
       first_task: postPrewarmRow,
       first_task_max_ms: 150
     },
