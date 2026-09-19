@@ -7,10 +7,12 @@ on:
       - main
     paths:
       - ".github/workflows/blitz-runtime-canary.yml"
+      - "package.json"
       - "src/warm-kernel.mjs"
       - "src/blitz-cache.mjs"
       - "services/warm-runner/**"
       - "scripts/run-real-webcontainer-warm-runner-canary.mjs"
+      - "scripts/write-warm-runner-stackblitz-evidence.mjs"
       - "scripts/build-runtime-sentinel-request.mjs"
 
 permissions:
