@@ -8,8 +8,10 @@ import { openBlitzResultCache } from "../../src/blitz-cache.mjs";
 
 const PORT=Number(process.env.PORT||10080);
 const TOKEN=process.env.ZEIBAEL_BURST_TOKEN||"";
-const PROVEN_WORKER_CEILING=1791,DEFAULT_MAX_CONCURRENCY=57,MAX_TASKS=512,DEFAULT_TTL=10*60*1000;
+const PROVEN_WORKER_CEILING=1791,DEFAULT_MAX_CONCURRENCY=57,HARD_TASK_CEILING=4096,DEFAULT_MAX_TASKS=4096,DEFAULT_TTL=10*60*1000;
 const MAX_CONCURRENCY=Math.max(1,Math.min(PROVEN_WORKER_CEILING,Number(process.env.ZEIBAEL_MAX_CONCURRENCY)||DEFAULT_MAX_CONCURRENCY));
+const MAX_TASKS=Math.max(1,Math.min(HARD_TASK_CEILING,Number(process.env.ZEIBAEL_MAX_TASKS)||DEFAULT_MAX_TASKS));
+const MAX_CODE_BYTES=64*1024,MAX_TOTAL_CODE_BYTES=8*1024*1024,MAX_BODY_BYTES=10*1024*1024;
 const here=path.dirname(fileURLToPath(import.meta.url));
 const KERNEL_PATH=path.resolve(here,"../../src/warm-kernel.mjs");
 const cache=await openBlitzResultCache();
@@ -107,7 +109,8 @@ function staticPureGuard(code){
   return blocked.every(r=>!r.test(s));
 }
 function normalizeTasks(tasks){
-  if(!Array.isArray(tasks)||tasks.length<1||tasks.length>MAX_TASKS)throw new Error("tasks_1_to_512_required");
+  if(!Array.isArray(tasks)||tasks.length<1||tasks.length>MAX_TASKS)throw new Error("tasks_1_to_"+MAX_TASKS+"_required");
+  let totalCodeBytes=0;
   return tasks.map((t,i)=>{
     const task={
       id:typeof t?.id==="string"?t.id.slice(0,64):"task-"+(i+1),
@@ -118,6 +121,10 @@ function normalizeTasks(tasks){
       side_effect_class:String(t?.side_effect_class||"NONE").toUpperCase()
     };
     if(!task.code)throw new Error("code_required:"+task.id);
+    const codeBytes=Buffer.byteLength(task.code,"utf8");
+    if(codeBytes>MAX_CODE_BYTES)throw new Error("code_too_large:"+task.id);
+    totalCodeBytes+=codeBytes;
+    if(totalCodeBytes>MAX_TOTAL_CODE_BYTES)throw new Error("total_code_too_large");
     if(!task.kernel_safe)throw new Error("kernel_safe_required:"+task.id);
     if(task.side_effect_class!=="NONE")throw new Error("side_effects_forbidden:"+task.id);
     if(!staticPureGuard(task.code))throw new Error("pure_guard_rejected:"+task.id);
@@ -151,14 +158,19 @@ async function runTasks(tasks,requestedConcurrency){
   return {ok:results.every(x=>x?.ok===true),results,concurrency:effective,executed,cache:{hits,misses,writes,entries:cache.size()}};
 }
 async function readJson(req){
-  const chunks=[];for await(const c of req)chunks.push(c);
+  const chunks=[];let size=0;
+  for await(const c of req){
+    size+=c.length;
+    if(size>MAX_BODY_BYTES)throw new Error("body_too_large");
+    chunks.push(c);
+  }
   const body=Buffer.concat(chunks).toString("utf8");return body?JSON.parse(body):{};
 }
 function send(res,status,body){res.statusCode=status;res.setHeader("content-type","application/json; charset=utf-8");res.setHeader("cache-control","no-store");res.end(JSON.stringify(body))}
 const server=http.createServer(async(req,res)=>{
   if(req.url==="/health"){
     if(!ready){try{await ensureKernel()}catch{}}
-    return send(res,200,{ok:ready,runner:"ZEIBAEL_BLITZ_WARM_RUNNER_V2",ready,kernel_pid:kernelPid,starts,restarts,recovery_cycles:recoveryCycles,last_boot_at:lastBootAt,last_run_at:lastRunAt,runs,cache_entries:cache.size(),max_concurrency:MAX_CONCURRENCY,proven_worker_ceiling:PROVEN_WORKER_CEILING,adaptive_concurrency:true,canonical_state:"SUPABASE",zero_spend_required:true,live_order_enabled:false});
+    return send(res,200,{ok:ready,runner:"ZEIBAEL_BLITZ_WARM_RUNNER_V2",ready,kernel_pid:kernelPid,starts,restarts,recovery_cycles:recoveryCycles,last_boot_at:lastBootAt,last_run_at:lastRunAt,runs,cache_entries:cache.size(),max_tasks:MAX_TASKS,max_concurrency:MAX_CONCURRENCY,proven_worker_ceiling:PROVEN_WORKER_CEILING,adaptive_concurrency:true,canonical_state:"SUPABASE",zero_spend_required:true,live_order_enabled:false});
   }
   if(req.url!=="/burst"||req.method!=="POST")return send(res,404,{ok:false,error:"not_found"});
   if(!TOKEN||req.headers.authorization!=="Bearer "+TOKEN)return send(res,401,{ok:false,error:"unauthorized"});
