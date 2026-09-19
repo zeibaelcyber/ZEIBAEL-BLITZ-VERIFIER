@@ -2,7 +2,9 @@ import { spawn } from "node:child_process";
 const port=19091,token="selftest-token";
 const child=spawn(process.execPath,["server.mjs"],{cwd:new URL(".",import.meta.url),env:{...process.env,PORT:String(port),ZEIBAEL_BURST_TOKEN:token},stdio:["ignore","pipe","pipe"]});
 let logs="";child.stdout.on("data",c=>logs+=c.toString());child.stderr.on("data",c=>logs+=c.toString());
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));\nlet finalExitCode=1;\nfunction emit(payload,code){finalExitCode=code;process.stdout.write("BLITZ_WARM_RUNNER_SELFTEST="+JSON.stringify(payload)+"\\n")}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let finalExitCode=1;
+function emit(payload,code){finalExitCode=code;process.stdout.write("BLITZ_WARM_RUNNER_SELFTEST="+JSON.stringify(payload)+"\\n")}
 async function waitHealth(){for(let i=0;i<80;i++){try{const r=await fetch("http://127.0.0.1:"+port+"/health");const j=await r.json();if(j.ready)return j}catch{}await sleep(50)}throw new Error("health_timeout")}
 async function burst(tasks){const r=await fetch("http://127.0.0.1:"+port+"/burst",{method:"POST",headers:{authorization:"Bearer "+token,"content-type":"application/json"},body:JSON.stringify({route:{execution_class:"LOCAL_BLITZ",broker_required:false},tasks,concurrency:2})});return {status:r.status,body:await r.json()}}
 try{
