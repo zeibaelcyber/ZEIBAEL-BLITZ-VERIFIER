@@ -151,10 +151,10 @@ async function browserCanary() {
     if(cacheDbReady !== true) throw new Error("CACHE_DB_INIT_FAILED");
     const idb = await idbSanity();
     stage = "watch";
-    const watchStart = await window.zeibaelWatch({ path: "/zeibael-runs", recursive: true });
+    const watchStart = await window.zeibaelWatch({ path: "/zeibael-watch", recursive: true });
 
   stage = "cold-run";
-  const fsCode = 'import fs from "node:fs/promises"; await fs.writeFile("canary.txt","v1"); console.log("watch-trigger")';
+  const fsCode = 'import fs from "node:fs/promises"; await fs.writeFile("../../zeibael-watch/canary.txt","v1"); console.log("watch-trigger")';
   const writeRun = await window.zeibaelRun({
     tasks: [{ id: "fs-write", code: fsCode, cache_safe: false, kernel_safe: false }],
     concurrency: 1,
