@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 const JOB_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
+const SAFE_HTTP_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 function stableObject(value) {
   if (Array.isArray(value)) return value.map(stableObject);
@@ -10,6 +11,13 @@ function stableObject(value) {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([key, val]) => [key, stableObject(val)])
   );
+}
+
+function hashStable(value, length = 64) {
+  return createHash("sha256")
+    .update(JSON.stringify(stableObject(value)))
+    .digest("hex")
+    .slice(0, length);
 }
 
 function jobSemanticShape(job) {
@@ -53,10 +61,7 @@ function dedupeEligible(job) {
 }
 
 function fingerprint(job) {
-  return createHash("sha256")
-    .update(JSON.stringify(stableObject(jobSemanticShape(job))))
-    .digest("hex")
-    .slice(0, 24);
+  return hashStable(jobSemanticShape(job), 24);
 }
 
 function validatePlanner(value) {
@@ -79,10 +84,13 @@ function validatePlanner(value) {
     if (!accepted.includes(role)) {
       throw new Error("BLITZ_SMART_PLANNER_ROLE_INVALID:" + name);
     }
+    if (entry.advisory_only === false) {
+      throw new Error("BLITZ_SMART_PLANNER_EXECUTION_AUTHORITY_FORBIDDEN:" + name);
+    }
     safe[name] = {
       role,
       runtime_verified: entry.runtime_verified === true,
-      advisory_only: entry.advisory_only !== false,
+      advisory_only: true,
       trace_id: typeof entry.trace_id === "string" ? entry.trace_id.slice(0, 128) : null
     };
   }
@@ -160,6 +168,93 @@ function criticalDepths(jobs) {
   return memo;
 }
 
+
+function transitiveReduce(jobs) {
+  const byId = new Map(jobs.map(j => [j.id, j]));
+  const reachMemo = new Map();
+
+  function ancestors(id) {
+    if (reachMemo.has(id)) return reachMemo.get(id);
+    const out = new Set();
+    for (const dep of byId.get(id)?.depends_on || []) {
+      out.add(dep);
+      for (const ancestor of ancestors(dep)) out.add(ancestor);
+    }
+    reachMemo.set(id, out);
+    return out;
+  }
+
+  let removed = 0;
+  const removedByJob = {};
+  const reduced = jobs.map(job => {
+    if (job.depends_on.length < 2) return job;
+    const redundant = new Set();
+    for (const dep of job.depends_on) {
+      for (const other of job.depends_on) {
+        if (other === dep) continue;
+        if (ancestors(other).has(dep)) {
+          redundant.add(dep);
+          break;
+        }
+      }
+    }
+    if (!redundant.size) return job;
+    const dropped = job.depends_on.filter(dep => redundant.has(dep));
+    removed += dropped.length;
+    removedByJob[job.id] = dropped;
+    return { ...job, depends_on: job.depends_on.filter(dep => !redundant.has(dep)) };
+  });
+
+  return { jobs: reduced, removed, removedByJob };
+}
+
+function dependencyLayerMetrics(jobs) {
+  const byId = new Map(jobs.map(j => [j.id, j]));
+  const memo = new Map();
+  function level(id) {
+    if (memo.has(id)) return memo.get(id);
+    const deps = byId.get(id)?.depends_on || [];
+    const value = deps.length ? 1 + Math.max(...deps.map(level)) : 0;
+    memo.set(id, value);
+    return value;
+  }
+  const widths = {};
+  for (const job of jobs) {
+    const l = level(job.id);
+    widths[l] = (widths[l] || 0) + 1;
+  }
+  return {
+    initial_ready_width: widths[0] || 0,
+    max_parallelizable_layer_width: Math.max(0, ...Object.values(widths)),
+    layer_widths: widths
+  };
+}
+
+function prevalidationMetrics(jobs, depths) {
+  const typeCounts = { command: 0, http: 0, inline: 0 };
+  let externalHttpJobs = 0;
+  let mutatingHttpJobs = 0;
+  let dedupeEligibleJobs = 0;
+  for (const job of jobs) {
+    typeCounts[job.type] = (typeCounts[job.type] || 0) + 1;
+    if (job.type === "http") {
+      externalHttpJobs++;
+      const method = String(job.method || "GET").toUpperCase();
+      if (!SAFE_HTTP_METHODS.has(method)) mutatingHttpJobs++;
+    }
+    if (dedupeEligible(job)) dedupeEligibleJobs++;
+  }
+  const layers = dependencyLayerMetrics(jobs);
+  return {
+    job_type_counts: typeCounts,
+    external_http_jobs: externalHttpJobs,
+    mutating_http_jobs: mutatingHttpJobs,
+    dedupe_eligible_jobs: dedupeEligibleJobs,
+    max_critical_depth: Math.max(0, ...depths.values()),
+    ...layers
+  };
+}
+
 export function compileSmartPacket(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("BLITZ_SMART_PACKET_INVALID");
   if (!Array.isArray(input.jobs) || input.jobs.length < 1) throw new Error("BLITZ_SMART_PACKET_EMPTY");
@@ -212,7 +307,7 @@ export function compileSmartPacket(input) {
     return current;
   }
 
-  const jobs = canonical.map(job => {
+  let jobs = canonical.map(job => {
     const deps = [];
     const seen = new Set();
     for (const dep of job.depends_on) {
@@ -226,6 +321,9 @@ export function compileSmartPacket(input) {
     return { ...job, depends_on: deps };
   });
 
+  assertAcyclic(jobs);
+  const reduction = transitiveReduce(jobs);
+  jobs = reduction.jobs;
   assertAcyclic(jobs);
   const depths = criticalDepths(jobs);
 
@@ -255,14 +353,46 @@ export function compileSmartPacket(input) {
   }));
 
   const aliases = Object.fromEntries(aliasToCanonical);
-  const runtimeVerifiedAdvisors = Object.values(planner || {}).filter(x => x.runtime_verified).length;
+  const plannerEntries = Object.values(planner || {});
+  const runtimeVerifiedAdvisors = plannerEntries.filter(x => x.runtime_verified).length;
+  const unverifiedAdvisorsBypassed = plannerEntries.filter(x => !x.runtime_verified).length;
+  const prevalidation = prevalidationMetrics(jobs, depths);
+  const advisorKernel = {
+    schema: "zeibael.blitz.internal-advisor-kernel.v1",
+    mode: "DETERMINISTIC_LOCAL",
+    external_roundtrips: 0,
+    external_runtime_promoted: false,
+    final_packet_immutable: true,
+    plan_compaction: {
+      equivalent_role: "PLAN_COMPACTION",
+      duplicate_jobs_removed: original.length - strippedJobs.length,
+      redundant_dependency_edges_removed: reduction.removed,
+      redundant_dependency_edges_by_job: reduction.removedByJob
+    },
+    prevalidation: {
+      equivalent_role: "PREVALIDATION",
+      ...prevalidation
+    },
+    external_advisors: {
+      present: plannerEntries.length,
+      runtime_verified: runtimeVerifiedAdvisors,
+      unverified_bypassed: unverifiedAdvisorsBypassed
+    }
+  };
+
+  const packetWithoutFingerprint = {
+    ...input,
+    smart_mode: "ONE_SHOT_FAST_PATH_V1",
+    planner,
+    advisor_kernel: advisorKernel,
+    jobs: strippedJobs
+  };
+  const packetFingerprint = hashStable(packetWithoutFingerprint, 64);
 
   return {
     packet: {
-      ...input,
-      smart_mode: "ONE_SHOT_FAST_PATH_V1",
-      planner,
-      jobs: strippedJobs
+      ...packetWithoutFingerprint,
+      packet_fingerprint: packetFingerprint
     },
     executionOrder,
     priorityById,
@@ -272,11 +402,15 @@ export function compileSmartPacket(input) {
       input_jobs: original.length,
       executable_jobs: strippedJobs.length,
       duplicates_removed: original.length - strippedJobs.length,
+      transitive_dependency_edges_removed: reduction.removed,
       dedupe_policy: "PURE_OR_EXPLICIT_ONLY",
-      planner_advisors_present: Object.keys(planner || {}).length,
+      planner_advisors_present: plannerEntries.length,
       planner_runtime_verified: runtimeVerifiedAdvisors,
+      planner_unverified_bypassed: unverifiedAdvisorsBypassed,
       dependency_graph_validated: true,
       critical_path_scheduling: true,
+      packet_fingerprint: packetFingerprint,
+      advisor_kernel: advisorKernel,
       live_order_enabled: false
     }
   };
