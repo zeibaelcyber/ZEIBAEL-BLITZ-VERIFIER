@@ -1,0 +1,30 @@
+name: ZEIBAEL Migration Shadow Adapters Canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/migration-shadow-adapters-canary.yml"
+      - "integrations/supabase-migration/shadow_adapters.py"
+      - "integrations/supabase-migration/jsonl_to_parquet_shadow.py"
+      - "scripts/test_migration_shadow_adapters.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      ZEIBAEL_NETWORK_POLICY: "NO_PRODUCTION_NETWORK"
+      ZEIBAEL_SUPABASE_MUTATION: "false"
+      ZEIBAEL_LIVE_ORDER_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.17"
+      - name: Run offline shadow adapter canary
+        run: |
+          uv run --with duckdb==1.5.5 python scripts/test_migration_shadow_adapters.py
