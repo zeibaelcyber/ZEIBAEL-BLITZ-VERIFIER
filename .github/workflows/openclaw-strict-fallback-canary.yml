@@ -1,3 +1,4 @@
+# Strict bounded fallback proof; Hermes is intentionally not part of this workflow.
 name: ZEIBAEL OpenClaw Strict Fallback Canary
 
 on:
@@ -25,7 +26,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-
       - name: Install exact OpenClaw and build restricted Docker sandbox
         shell: bash
         run: |
@@ -42,20 +42,14 @@ jobs:
           CMD ["sleep", "infinity"]
           DOCKERFILE
           docker image inspect openclaw-sandbox:bookworm-slim >/dev/null
-
       - name: Start local zero-spend provider stub
         shell: bash
         run: |
           set -euo pipefail
           OPENCLAW_CANARY_PORT=18766 python scripts/openclaw-local-provider-stub.py >"$RUNNER_TEMP/openclaw-stub.log" 2>&1 &
           echo $! >"$RUNNER_TEMP/openclaw-stub.pid"
-          for i in $(seq 1 30); do
-            curl -fsS http://127.0.0.1:18766/v1/health >/dev/null && exit 0
-            sleep 1
-          done
-          cat "$RUNNER_TEMP/openclaw-stub.log"
-          exit 1
-
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18766/v1/health >/dev/null && exit 0; sleep 1; done
+          cat "$RUNNER_TEMP/openclaw-stub.log"; exit 1
       - name: Write strict isolated OpenClaw policy
         shell: bash
         run: |
@@ -63,38 +57,9 @@ jobs:
           export OPENCLAW_STATE_DIR="$RUNNER_TEMP/openclaw-state"
           mkdir -p "$OPENCLAW_STATE_DIR"
           cat >"$OPENCLAW_STATE_DIR/openclaw.json" <<'JSON'
-          {
-            "gateway": {"mode":"local", "bind":"loopback"},
-            "models": {
-              "mode":"replace",
-              "providers": {
-                "zeibael-local": {
-                  "baseUrl":"http://127.0.0.1:18766/v1",
-                  "apiKey":"zero-spend-local-not-a-secret",
-                  "api":"openai-completions",
-                  "models":[{"id":"canary-model","name":"ZEIBAEL Local Canary","reasoning":false,"input":["text"],"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0},"contextWindow":8192,"maxTokens":256}]
-                }
-              }
-            },
-            "agents": {
-              "defaults": {
-                "model": {"primary":"zeibael-local/canary-model", "fallbacks":[]},
-                "sandbox": {
-                  "mode":"all", "backend":"docker", "scope":"session", "workspaceAccess":"none",
-                  "docker":{"image":"openclaw-sandbox:bookworm-slim","readOnlyRoot":true,"tmpfs":["/tmp","/var/tmp","/run"],"network":"none","capDrop":["ALL"]}
-                }
-              }
-            },
-            "tools": {
-              "elevated":{"enabled":false},
-              "deny":["exec","process","write","edit","apply_patch","cron","gateway","nodes","sessions_spawn","sessions_send"],
-              "sandbox":{"tools":{"deny":["exec","process","write","edit","apply_patch","cron","gateway","nodes","sessions_spawn","sessions_send"]}}
-            },
-            "commands":{"restart":false}
-          }
+          {"gateway":{"mode":"local","bind":"loopback"},"models":{"mode":"replace","providers":{"zeibael-local":{"baseUrl":"http://127.0.0.1:18766/v1","apiKey":"zero-spend-local-not-a-secret","api":"openai-completions","models":[{"id":"canary-model","name":"ZEIBAEL Local Canary","reasoning":false,"input":["text"],"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0},"contextWindow":8192,"maxTokens":256}]}}},"agents":{"defaults":{"model":{"primary":"zeibael-local/canary-model","fallbacks":[]},"sandbox":{"mode":"all","backend":"docker","scope":"session","workspaceAccess":"none","docker":{"image":"openclaw-sandbox:bookworm-slim","readOnlyRoot":true,"tmpfs":["/tmp","/var/tmp","/run"],"network":"none","capDrop":["ALL"]}}}},"tools":{"elevated":{"enabled":false},"deny":["exec","process","write","edit","apply_patch","cron","gateway","nodes","sessions_spawn","sessions_send"],"sandbox":{"tools":{"deny":["exec","process","write","edit","apply_patch","cron","gateway","nodes","sessions_spawn","sessions_send"]}}},"commands":{"restart":false}}
           JSON
           python -m json.tool "$OPENCLAW_STATE_DIR/openclaw.json" >/dev/null
-
       - name: Validate effective sandbox and denied escape surfaces
         shell: bash
         run: |
@@ -106,7 +71,6 @@ jobs:
           grep -Ei 'docker' "$RUNNER_TEMP/sandbox-explain.txt" >/dev/null
           grep -Ei 'mode.*all' "$RUNNER_TEMP/sandbox-explain.txt" >/dev/null
           grep -Ei 'exec|process|write|edit|apply_patch|cron|gateway|nodes' "$RUNNER_TEMP/sandbox-explain.txt" >/dev/null
-
       - name: Start real local Gateway and execute bounded agent turn
         shell: bash
         run: |
@@ -115,31 +79,17 @@ jobs:
           export NO_PROXY=127.0.0.1,localhost
           openclaw gateway run --port 18789 >"$RUNNER_TEMP/openclaw-gateway.log" 2>&1 &
           echo $! >"$RUNNER_TEMP/openclaw-gateway.pid"
-          for i in $(seq 1 45); do
-            if openclaw gateway status >/dev/null 2>&1; then break; fi
-            sleep 1
-          done
+          for i in $(seq 1 45); do if openclaw gateway status >/dev/null 2>&1; then break; fi; sleep 1; done
           openclaw gateway status | tee "$RUNNER_TEMP/gateway-status.txt"
           timeout 90s openclaw agent --agent main --message 'Return exactly ZEIBAEL_OPENCLAW_STRICT_CANARY_PASS and nothing else. Do not call tools.' --model zeibael-local/canary-model --json >"$RUNNER_TEMP/openclaw-agent.json"
           cat "$RUNNER_TEMP/openclaw-agent.json"
           grep -F 'ZEIBAEL_OPENCLAW_STRICT_CANARY_PASS' "$RUNNER_TEMP/openclaw-agent.json" >/dev/null
           grep -F 'POST /v1/chat/completions' "$RUNNER_TEMP/openclaw-stub.log" >/dev/null
-
           python - <<'PY'
           import json
-          evidence = {
-            "status":"PASS","version":"2026.6.35","runtime":"GITHUB_ACTIONS_PUBLIC_ZERO_SPEND",
-            "gateway_runtime":True,"bounded_agent_turn":True,"docker_sandbox_policy_runtime":True,
-            "workspaceAccess":"none","elevated_enabled":False,
-            "mutation_runtime_scheduler_tools_denied":True,"cron_heartbeat_duplication":False,
-            "local_stub_provider":True,"external_metered_provider_fallback":False,
-            "production_credentials_mounted":False,"live_order_enabled":False,
-            "scheduler_owner_changed":False,"canonical_memory_owner_changed":False,
-            "primary_orchestrator_changed":False
-          }
-          print("ZEIBAEL_OPENCLAW_STRICT_CANARY=" + json.dumps(evidence,separators=(",",":")))
+          evidence={"status":"PASS","version":"2026.6.35","runtime":"GITHUB_ACTIONS_PUBLIC_ZERO_SPEND","gateway_runtime":True,"bounded_agent_turn":True,"docker_sandbox_policy_runtime":True,"workspaceAccess":"none","elevated_enabled":False,"mutation_runtime_scheduler_tools_denied":True,"cron_heartbeat_duplication":False,"local_stub_provider":True,"external_metered_provider_fallback":False,"production_credentials_mounted":False,"live_order_enabled":False,"scheduler_owner_changed":False,"canonical_memory_owner_changed":False,"primary_orchestrator_changed":False}
+          print("ZEIBAEL_OPENCLAW_STRICT_CANARY="+json.dumps(evidence,separators=(",",":")))
           PY
-
       - name: Stop local runtime
         if: always()
         shell: bash
