@@ -1,7 +1,7 @@
 {
   "schema": "zeibael.blitz.capability-map.config.v1",
-  "manual_only": true,
-  "auto_trigger_workers": false,
+  "manual_only": false,
+  "auto_trigger_workers": true,
   "profiles": {
     "LIGHT": {
       "timeout_ms": 15000,
@@ -28,5 +28,6 @@
       "version": 1
     }
   },
-  "exact_boundary_confirmation_rounds": 2
+  "exact_boundary_confirmation_rounds": 2,
+  "policy": "PROFILE_AWARE_ADAPTIVE_CONCURRENCY"
 }
