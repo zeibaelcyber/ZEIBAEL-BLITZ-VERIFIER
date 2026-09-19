@@ -30,6 +30,6 @@
   },
   "stackblitz": {
     "installDependencies": false,
-    "startCommand": "npm run warm-runner:selftest"
+    "startCommand": "npm run smart:one-shot"
   }
 }
