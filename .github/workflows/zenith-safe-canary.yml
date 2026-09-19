@@ -1,0 +1,24 @@
+name: ZEIBAEL Zenith Safe Harness Canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/zenith-safe-canary.yml"
+      - "scripts/patch_zenith_safe.py"
+      - "scripts/zenith-safe-canary.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.17"
+      - name: Run Zenith safe harness canary
+        run: uv run --with fastmcp --with pydantic --with jinja2 --with pyyaml --with click python scripts/zenith-safe-canary.py
