@@ -69,10 +69,16 @@ jobs:
           export OPENCLAW_STATE_DIR="$RUNNER_TEMP/openclaw-state"
           openclaw sandbox explain --agent main >"$RUNNER_TEMP/sandbox-explain.txt" 2>&1
           cat "$RUNNER_TEMP/sandbox-explain.txt"
-          grep -Ei 'workspaceAccess.*none|workspace access.*none' "$RUNNER_TEMP/sandbox-explain.txt" >/dev/null
-          grep -Ei 'docker' "$RUNNER_TEMP/sandbox-explain.txt" >/dev/null
-          grep -Ei 'mode.*all' "$RUNNER_TEMP/sandbox-explain.txt" >/dev/null
-          grep -Ei 'exec|process|write|edit|apply_patch|cron|gateway|nodes' "$RUNNER_TEMP/sandbox-explain.txt" >/dev/null
+          grep -Ei 'runtime:[[:space:]]*sandboxed' "$RUNNER_TEMP/sandbox-explain.txt" >/dev/null
+          grep -Ei 'workspaceAccess:[[:space:]]*none|workspace access.*none' "$RUNNER_TEMP/sandbox-explain.txt" >/dev/null
+          grep -Ei 'mode:[[:space:]]*all' "$RUNNER_TEMP/sandbox-explain.txt" >/dev/null
+          grep -Ei 'deny[[:space:]]+\(global\):.*exec.*process.*write.*edit.*apply_patch.*cron.*gateway.*nodes' "$RUNNER_TEMP/sandbox-explain.txt" >/dev/null
+          grep -Ei 'enabled:[[:space:]]*false' "$RUNNER_TEMP/sandbox-explain.txt" >/dev/null
+          test "$(jq -r '.agents.defaults.sandbox.backend' "$OPENCLAW_STATE_DIR/openclaw.json")" = "docker"
+          test "$(jq -r '.agents.defaults.sandbox.workspaceAccess' "$OPENCLAW_STATE_DIR/openclaw.json")" = "none"
+          test "$(jq -r '.tools.elevated.enabled' "$OPENCLAW_STATE_DIR/openclaw.json")" = "false"
+          test "$(jq -r '.agents.defaults.sandbox.docker.network' "$OPENCLAW_STATE_DIR/openclaw.json")" = "none"
+          test "$(jq -r '.agents.defaults.sandbox.docker.readOnlyRoot' "$OPENCLAW_STATE_DIR/openclaw.json")" = "true"
       - name: Start real local Gateway and execute bounded agent turn
         shell: bash
         run: |
