@@ -1,0 +1,35 @@
+name: ZEIBAEL Doppler Readonly MCP Canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/doppler-readonly-canary.yml"
+      - "scripts/doppler-readonly-canary.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Build exact Doppler MCP commit
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@11.22.0 --activate
+          git clone --quiet https://github.com/DopplerHQ/mcp-server.git /tmp/doppler-mcp
+          git -C /tmp/doppler-mcp checkout --quiet --detach 989b827c0ff9c93cba529549c2bbed50a48a9191
+          test "$(git -C /tmp/doppler-mcp rev-parse HEAD)" = "989b827c0ff9c93cba529549c2bbed50a48a9191"
+          cd /tmp/doppler-mcp
+          pnpm install --frozen-lockfile
+          pnpm audit --audit-level high
+          pnpm run build
+      - name: Run no-account read-only Doppler canary
+        run: bash scripts/doppler-readonly-canary.sh
