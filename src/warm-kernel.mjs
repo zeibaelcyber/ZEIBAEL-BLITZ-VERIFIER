@@ -2,7 +2,7 @@ import { Worker } from "node:worker_threads";
 import readline from "node:readline";
 const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});
 const MAX_OUTPUT=6000;
-const PREWARM_TARGET=Math.max(1,Math.min(8,Number(process.env.ZEIBAEL_KERNEL_PREWARM)||4));
+const PREWARM_TARGET=Math.max(1,Math.min(8,Number(process.env.ZEIBAEL_KERNEL_PREWARM)||8));
 const PREPARE_TIMEOUT_MS=5000;
 const idle=[],preparedWaiters=[];
 let preparing=0,poolSpawned=0,poolUses=0,poolColdFallbacks=0,poolReplenishments=0,poolWaitedForReplenish=0;
