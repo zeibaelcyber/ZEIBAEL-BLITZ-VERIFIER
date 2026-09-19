@@ -68,19 +68,10 @@ for old,new in repls:
         raise SystemExit(f"expected exactly one upstream pattern, got {count}: {old[:80]!r}")
     text=text.replace(old,new)
 
-for forbidden in [
-    'sandbox_mode="danger-full-access"',
-    'env["CODEX_DISABLE_SANDBOX"] = "1"',
-    'codex_config["sandbox_mode"] = "danger-full-access"',
-]:
+for forbidden in ['sandbox_mode="danger-full-access"','CODEX_DISABLE_SANDBOX"] = "1"','codex_config["sandbox_mode"] = "danger-full-access"']:
     if forbidden in text:
         raise SystemExit(f"unsafe Zenith pattern survived patch: {forbidden}")
-for required in [
-    'sandbox_mode="workspace-write"',
-    'approval_policy="on-request"',
-    'sandbox_workspace_write.network_access=false',
-    '{"network_access": False}',
-]:
+for required in ['sandbox_mode="workspace-write"','approval_policy="on-request"','sandbox_workspace_write.network_access=false','{"network_access": False}']:
     if required not in text:
         raise SystemExit(f"safe Zenith pattern missing after patch: {required}")
 
