@@ -145,8 +145,11 @@ async function snapshotSet(key,tree){
   })
 }
 async function hydrateKernelFiles(c,root){
+  const totalStarted=performance.now();
   const key='warm-kernel-v1';
+  const lookupStarted=performance.now();
   const snap=await snapshotGet(key);
+  const lookupMs=Math.round(performance.now()-lookupStarted);
   let snapTree=snap?.tree||null;
   if(!snapTree&&typeof snap?.tree_json==='string'){
     try{snapTree=JSON.parse(snap.tree_json)}
@@ -163,8 +166,10 @@ async function hydrateKernelFiles(c,root){
         top_keys:Object.keys(snapTree||{}).slice(0,12),
         top_shapes:Object.fromEntries(Object.entries(snapTree||{}).slice(0,12).map(([k,v])=>[k,v&&typeof v==='object'?Object.keys(v).slice(0,6):typeof v]))
       });
+      const mountStarted=performance.now();
       await c.fs.mkdir(mountPoint,{recursive:true});
       await c.mount(snapTree,{mountPoint});
+      const mountMs=Math.round(performance.now()-mountStarted);
       let repaired=false;
       try{
         const restored=await c.fs.readFile(root+'/kernel.mjs','utf8');
@@ -175,26 +180,34 @@ async function hydrateKernelFiles(c,root){
         repaired=true;
         pushRuntimeEvent('snapshot_repaired',{key,message:String(e?.message||e)})
       }
-      snapshotHits++;pushRuntimeEvent('snapshot_hit',{key,repaired});
-      return {source:repaired?'SNAPSHOT_REPAIRED':'SNAPSHOT'}
+      snapshotHits++;pushRuntimeEvent('snapshot_hit',{key,repaired,mount_ms:mountMs,lookup_ms:lookupMs});
+      return {source:repaired?'SNAPSHOT_REPAIRED':'SNAPSHOT',lookup_ms:lookupMs,mount_ms:mountMs,total_ms:Math.round(performance.now()-totalStarted)}
     }catch(e){pushRuntimeEvent('snapshot_mount_failed',{message:String(e?.message||e)})}
   }
   snapshotMisses++;
+  const writeStarted=performance.now();
   await c.fs.mkdir(root,{recursive:true});
   await c.fs.writeFile(root+'/kernel.mjs',WARM_KERNEL_SOURCE);
+  const writeMs=Math.round(performance.now()-writeStarted);
+  let snapshotStoreMs=0;
   try{
+    const exportStarted=performance.now();
     const exportPath=(root.startsWith('/')?root.slice(1):root); const tree=await c.export(exportPath,{format:'json'});
+    const exportMs=Math.round(performance.now()-exportStarted);
     pushRuntimeEvent('snapshot_tree_keys',{
       phase:'write',
       key,
       root,
       export_path:exportPath,
       top_keys:Object.keys(tree||{}).slice(0,12),
-      top_shapes:Object.fromEntries(Object.entries(tree||{}).slice(0,12).map(([k,v])=>[k,v&&typeof v==='object'?Object.keys(v).slice(0,6):typeof v]))
+      top_shapes:Object.fromEntries(Object.entries(tree||{}).slice(0,12).map(([k,v])=>[k,v&&typeof v==='object'?Object.keys(v).slice(0,6):typeof v])),
+      export_ms:exportMs
     });
+    const storeStarted=performance.now();
     if(await snapshotSet(key,tree)){snapshotWrites++;pushRuntimeEvent('snapshot_write',{key})}
+    snapshotStoreMs=Math.round(performance.now()-storeStarted);
   }catch(e){pushRuntimeEvent('snapshot_export_failed',{message:String(e?.message||e)})}
-  return {source:'SOURCE_WRITE'}
+  return {source:'SOURCE_WRITE',lookup_ms:lookupMs,write_ms:writeMs,snapshot_store_ms:snapshotStoreMs,total_ms:Math.round(performance.now()-totalStarted)}
 }
 
 function openCacheDb(){
