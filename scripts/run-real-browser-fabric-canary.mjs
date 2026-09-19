@@ -9,8 +9,8 @@ const API_VERSION = "1.6.4";
 const FIXTURE = "fixtures/browser-fabric-v19.html";
 const EVIDENCE = "evidence/browser-fabric-real-host.json";
 const LIVE_EDGE_URL = "https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-stackblitz-direct?lane=stackblitz-compute-v1";
-const PRIVATE_SOURCE_COMMIT = "370c53438957bb26dde6e36b13b7d9be54f43250";
-const PRIVATE_SOURCE_BLOB = "d06cfc4f97d7eaf691efd1d42f278eae8bbe1d79";
+const PRIVATE_SOURCE_COMMIT = "e1e7ea15dd1ba0e4eb532cc6f5d6a6970427138b";
+const PRIVATE_SOURCE_BLOB = "39f947451d82e67c0ff41854d063175bc0ebc7b7";
 
 const html = await readFile(FIXTURE, "utf8");
 const fixtureSha256 = createHash("sha256").update(html, "utf8").digest("hex");
