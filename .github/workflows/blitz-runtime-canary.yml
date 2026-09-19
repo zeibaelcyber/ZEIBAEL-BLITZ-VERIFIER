@@ -73,7 +73,7 @@ jobs:
           node -e '
             const fs=require("node:fs");
             const j=JSON.parse(fs.readFileSync("evidence/ingest-response.json","utf8"));
-            if(j.ok!==true||j.accepted!==true||j.promotion_automatic!==false){
+            if(j.ok!==true||j.accepted!==true||j.promotion_automatic!==true){
               console.error(JSON.stringify(j));
               process.exit(1);
             }
@@ -140,7 +140,7 @@ jobs:
           node -e '
             const fs=require("node:fs");
             const j=JSON.parse(fs.readFileSync("evidence/browser-fabric-ingest-response.json","utf8"));
-            if(j.ok!==true||j.accepted!==true||j.promotion_automatic!==false){
+            if(j.ok!==true||j.accepted!==true||j.promotion_automatic!==true){
               console.error(JSON.stringify(j));
               process.exit(1);
             }
