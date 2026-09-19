@@ -76,7 +76,8 @@ if(health.secrets_exposed!==false) fail('health_secrets_exposed');
 const registry=(health.checks||[]).find(x=>x?.name==='blitz.primary_registry');
 if(registry?.ok!==true) fail('primary_registry_not_ok');
 if(Number(registry?.detail?.max_concurrency)!==expectedGlobal) fail('health_global_concurrency');
-const browser=(health.checks||[]).find(x=>x?.name==='blitz.browser_fabric' || x?.name==='blitz.browser_fabric_runtime' || x?.name==='blitz.snapshot_host_canary');
+const browser=(health.checks||[]).find(x=>x?.name==='blitz.browser_fabric_runtime');
+if(browser?.ok!==true || browser?.required!==true) fail('browser_fabric_required_runtime_not_ok');
 
 const directUrl='https://pfxcdxxxcyoinlksruoy.supabase.co/functions/v1/zeibael-stackblitz-direct?lane=stackblitz-compute-v1';
 const direct=(await fetchText(directUrl)).body;
@@ -100,7 +101,7 @@ const evidence={
     required_pass:health.summary?.pass??null,
     required_total:health.summary?.total_required??null,
     primary_registry_ok:registry?.ok===true,
-    browser_optional_check:browser?.ok??null
+    browser_fabric_required_ok:browser?.ok===true
   },
   live_edge:{
     max_concurrency:expectedGlobal,
