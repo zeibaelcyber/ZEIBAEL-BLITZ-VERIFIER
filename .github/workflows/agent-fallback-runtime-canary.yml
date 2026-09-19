@@ -107,7 +107,7 @@ jobs:
           JSON
 
           npx --yes --package=openclaw@2026.6.35 -- openclaw config validate --json | tee "$RUNNER_TEMP/openclaw-config-validate.json"
-          grep -E '"ok"[[:space:]]*:[[:space:]]*true' "$RUNNER_TEMP/openclaw-config-validate.json" >/dev/null
+          grep -E '"valid"[[:space:]]*:[[:space:]]*true' "$RUNNER_TEMP/openclaw-config-validate.json" >/dev/null
 
           test "$(npx --yes --package=openclaw@2026.6.35 -- openclaw config get agents.defaults.sandbox.mode --json | tr -d '[:space:]')" = '"all"'
           test "$(npx --yes --package=openclaw@2026.6.35 -- openclaw config get agents.defaults.sandbox.backend --json | tr -d '[:space:]')" = '"docker"'
