@@ -1,0 +1,118 @@
+{
+  "task_id": "zeibael-model-router-decision-20260919",
+  "objective": "Fast safe model-router decision using current live ZEIBAEL provider state.",
+  "max_concurrency": 16,
+  "planner": {
+    "openclaw": {
+      "role": "PLAN_COMPACTOR",
+      "runtime_verified": false,
+      "advisory_only": true,
+      "trace_id": "decision-openclaw"
+    },
+    "hermes": {
+      "role": "PREVALIDATOR",
+      "runtime_verified": false,
+      "advisory_only": true,
+      "trace_id": "decision-hermes"
+    }
+  },
+  "jobs": [
+    {
+      "id": "chatgpt_surface",
+      "type": "inline",
+      "code": "const x={backend:false,gated:true};if(x.backend||!x.gated)throw new Error('chatgpt_surface_wrong');return x"
+    },
+    {
+      "id": "gemini_active",
+      "type": "inline",
+      "code": "const x={backend:true,active:true};if(!x.backend||!x.active)throw new Error('gemini_inactive');return x"
+    },
+    {
+      "id": "gemini_trust",
+      "type": "inline",
+      "code": "const x={trust:'QUALIFIED_FALLBACK'};if(x.trust!=='QUALIFIED_FALLBACK')throw new Error('gemini_trust');return x"
+    },
+    {
+      "id": "gemini_zero_spend",
+      "type": "inline",
+      "code": "const x={zero_spend_confidence:100};if(x.zero_spend_confidence!==100)throw new Error('gemini_zero_spend');return x"
+    },
+    {
+      "id": "gemini_stale_health",
+      "type": "inline",
+      "code": "const x={fresh:false};if(x.fresh)throw new Error('gemini_expected_stale');return x"
+    },
+    {
+      "id": "critical_caps",
+      "type": "inline",
+      "code": "const x={count:5};if(x.count!==5)throw new Error('critical_caps');return x"
+    },
+    {
+      "id": "groq_noncritical",
+      "type": "inline",
+      "code": "const x={critical_caps:0};if(x.critical_caps!==0)throw new Error('groq_critical');return x"
+    },
+    {
+      "id": "cfai_noncritical",
+      "type": "inline",
+      "code": "const x={critical_allowed:false};if(x.critical_allowed)throw new Error('cfai_critical');return x"
+    },
+    {
+      "id": "openrouter_noncritical",
+      "type": "inline",
+      "code": "const x={fresh:true,critical_allowed:false};if(!x.fresh||x.critical_allowed)throw new Error('openrouter_state');return x"
+    },
+    {
+      "id": "router_patch",
+      "type": "inline",
+      "code": "const x={active_required:true,exhausted_blocked:true,unknown_policy_blocked:true,route_order_first:true};if(!Object.values(x).every(Boolean))throw new Error('router_patch');return x"
+    },
+    {
+      "id": "scheduler",
+      "type": "inline",
+      "code": "const x={trust:'PRIMARY',health:'HEALTHY',resource:'ACTIVE'};if(x.trust!=='PRIMARY'||x.health!=='HEALTHY'||x.resource!=='ACTIVE')throw new Error('scheduler');return x"
+    },
+    {
+      "id": "deploy_fallback",
+      "type": "inline",
+      "code": "const x={vercel:'GATED',hatchable:'ACTIVE'};if(x.vercel!=='GATED'||x.hatchable!=='ACTIVE')throw new Error('deploy_fallback');return x"
+    },
+    {
+      "id": "catalog_only",
+      "type": "inline",
+      "code": "return {generation:false,catalog_only:true}"
+    },
+    {
+      "id": "zero_spend_guard",
+      "type": "inline",
+      "code": "return {zero_spend_only:true,paid_fallback:false}"
+    },
+    {
+      "id": "live_order_guard",
+      "type": "inline",
+      "code": "return {live_order_enabled:false}"
+    },
+    {
+      "id": "decision",
+      "type": "inline",
+      "depends_on": [
+        "chatgpt_surface",
+        "gemini_active",
+        "gemini_trust",
+        "gemini_zero_spend",
+        "gemini_stale_health",
+        "critical_caps",
+        "groq_noncritical",
+        "cfai_noncritical",
+        "openrouter_noncritical",
+        "router_patch",
+        "scheduler",
+        "deploy_fallback",
+        "catalog_only",
+        "zero_spend_guard",
+        "live_order_guard"
+      ],
+      "code": "return {status:'PASS',decision:'REFRESH_GEMINI_ZERO_COST_CATALOG_FIRST',secondary:['OPTIONAL_GROQ_CATALOG_REFRESH','KEEP_CLOUDFLARE_AI_NONCRITICAL','KEEP_OPENROUTER_NONCRITICAL'],do_not:['PROMOTE_UNVERIFIED_CRITICAL_MODEL','ENABLE_LIVE_ORDER','USE_PAID_FALLBACK','BYPASS_RESOURCE_GATES'],max_stable_concurrency:16}"
+    }
+  ]
+}
