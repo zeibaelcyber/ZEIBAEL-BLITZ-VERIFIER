@@ -1,0 +1,34 @@
+name: ZEIBAEL Infisical Hardened Canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/infisical-hardened-canary.yml"
+      - "scripts/infisical-hardened-canary.mcp.json"
+      - "scripts/infisical-hardened-canary.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Build exact hardened Infisical commit
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/Infisical/infisical-mcp-server.git /tmp/infisical-mcp
+          git -C /tmp/infisical-mcp checkout --quiet --detach d19e3ca244d0c1b2506d39803a73e6e2c3730efa
+          test "$(git -C /tmp/infisical-mcp rev-parse HEAD)" = "d19e3ca244d0c1b2506d39803a73e6e2c3730efa"
+          cd /tmp/infisical-mcp
+          npm ci --ignore-scripts
+          npm audit --audit-level=high
+          npm run build
+      - name: Run no-account hardened Infisical canary
+        run: node scripts/infisical-hardened-canary.mjs
