@@ -178,8 +178,8 @@ async function hydrateKernelFiles(c,root){
         await c.fs.writeFile(root+'/kernel.mjs',WARM_KERNEL_SOURCE);
         const writeMs=Math.round(performance.now()-writeStarted);
         snapshotHits++;snapshotBypasses++;
-        pushRuntimeEvent('snapshot_hit',{key,repaired:false,bypassed:true,mounted:false,lookup_ms:lookupMs,write_ms:writeMs,reason:'SINGLE_FILE_DIRECT_WRITE_FASTER'});
-        pushRuntimeEvent('snapshot_bypass',{key,reason:'SINGLE_FILE_DIRECT_WRITE_FASTER',snapshot_available:true,write_ms:writeMs});
+        pushRuntimeEvent('snapshot_hit',{key,repaired:false,bypassed:true,mounted:false,lookup_ms:lookupMs,write_ms:writeMs,reason:'BENCHMARK_SELECTED_DIRECT_WRITE'});
+        pushRuntimeEvent('snapshot_bypass',{key,reason:'BENCHMARK_SELECTED_DIRECT_WRITE',snapshot_available:true,write_ms:writeMs});
         return {source:'SNAPSHOT_BYPASS_SOURCE_WRITE',lookup_ms:lookupMs,write_ms:writeMs,bypassed:true,total_ms:Math.round(performance.now()-totalStarted)}
       }
       const mountStarted=performance.now();
@@ -373,7 +373,7 @@ function normalizeTasks(tasks){
     return{id,code,cache_safe:t?.cache_safe===true,kernel_safe:t?.kernel_safe===true,cache_ttl_ms:Number(t?.cache_ttl_ms)||null,timeout_ms:Math.max(500,Math.min(30000,Number(t?.timeout_ms)||10000))}
   })
 }
-window.zeibaelProbe=()=>({coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,hardwareConcurrency:navigator.hardwareConcurrency||null,deviceMemory:navigator.deviceMemory||null,ua:navigator.userAgent,status:status.textContent,l1_cache_entries:resultCache.size,l2_cache:'INDEXEDDB_FAIL_OPEN',max_concurrency:MAX_CONCURRENCY,profile_caps:PROFILE_CAPS,max_tasks:MAX_TASKS,max_total_code_bytes:MAX_TOTAL_CODE_BYTES,kernel_alive:kernelAlive,kernel_starts:kernelStarts,kernel_restarts:kernelRestarts,snapshot_hits:snapshotHits,snapshot_misses:snapshotMisses,snapshot_writes:snapshotWrites,snapshot_bypasses:snapshotBypasses,boot_count:bootCount,last_boot_ms:lastBootMs,event_count:runtimeEvents.length});
+window.zeibaelProbe=()=>({coi:self.crossOriginIsolated,sab:typeof SharedArrayBuffer,hardwareConcurrency:navigator.hardwareConcurrency||null,deviceMemory:navigator.deviceMemory||null,ua:navigator.userAgent,status:status.textContent,l1_cache_entries:resultCache.size,l2_cache:'INDEXEDDB_FAIL_OPEN',max_concurrency:MAX_CONCURRENCY,profile_caps:PROFILE_CAPS,max_tasks:MAX_TASKS,max_total_code_bytes:MAX_TOTAL_CODE_BYTES,kernel_alive:kernelAlive,kernel_starts:kernelStarts,kernel_restarts:kernelRestarts,snapshot_hits:snapshotHits,snapshot_misses:snapshotMisses,snapshot_writes:snapshotWrites,snapshot_bypasses:snapshotBypasses,hydration_fast_path:'DIRECT_WRITE',boot_count:bootCount,last_boot_ms:lastBootMs,event_count:runtimeEvents.length});
 window.zeibaelEvents=()=>runtimeEvents.slice();
 window.zeibaelClearL1Cache=()=>{const before=resultCache.size;resultCache.clear();return before};
 window.zeibaelResetRuntime=async()=>{resetKernelState('manual_reset');if(fabricWatcher){try{fabricWatcher.close()}catch{}fabricWatcher=null}if(wc){try{wc.teardown()}catch{}}wc=null;bootPromise=null;eventListenersInstalled=false;status.textContent='READY_LAZY';return {ok:true}};
