@@ -20,13 +20,14 @@
     "audit:selfhost-mcp": "node scripts/run-self-hosted-mcp-replacement.mjs",
     "smart:selftest": "node scripts/smart-packet-selftest.mjs",
     "smart:one-shot": "node src/acker-accelerator.mjs examples/openclaw-hermes-one-shot.packet.json",
-    "smart:proof": "node src/acker-accelerator.mjs examples/openclaw-hermes-one-shot.packet.json"
+    "smart:proof": "node src/acker-accelerator.mjs examples/openclaw-hermes-one-shot.packet.json",
+    "decision:model-router": "node src/acker-accelerator.mjs examples/model-router-decision.packet.json"
   },
   "engines": {
     "node": ">=18"
   },
   "stackblitz": {
     "installDependencies": false,
-    "startCommand": "npm run smart:one-shot"
+    "startCommand": "npm run decision:model-router"
   }
 }
