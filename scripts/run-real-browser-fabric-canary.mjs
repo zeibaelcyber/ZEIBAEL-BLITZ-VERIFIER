@@ -125,7 +125,7 @@ async function browserCanary() {
     const watchStart = await window.zeibaelWatch({ path: "/zeibael-watch", recursive: true });
 
   stage = "cold-run";
-  const fsCode = 'import fs from "node:fs/promises"; await fs.writeFile("/zeibael-watch/canary.txt","v1"); console.log("watch-trigger")';
+  const fsCode = 'import fs from "node:fs/promises"; await fs.mkdir("/zeibael-watch",{recursive:true}); await fs.writeFile("/zeibael-watch/canary.txt","v1"); console.log("watch-trigger")';
   const writeRun = await window.zeibaelRun({
     tasks: [{ id: "fs-write", code: fsCode, cache_safe: false, kernel_safe: false }],
     concurrency: 1,
