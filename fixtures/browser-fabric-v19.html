@@ -144,6 +144,19 @@ async function snapshotSet(key,tree){
     }catch(e){pushRuntimeEvent('snapshot_store_exception',{key,message:String(e?.message||e)});resolve(false)}
   })
 }
+async function snapshotDelete(key){
+  const db=await openCacheDb();
+  if(!db)return false;
+  return await new Promise(resolve=>{
+    try{
+      const tx=db.transaction(IDB_STORE,'readwrite');
+      tx.objectStore(IDB_STORE).delete('snapshot:'+key);
+      tx.oncomplete=()=>resolve(true);
+      tx.onerror=()=>resolve(false);
+      tx.onabort=()=>resolve(false)
+    }catch{resolve(false)}
+  })
+}
 async function hydrateKernelFiles(c,root){
   const totalStarted=performance.now();
   const key='warm-kernel-v1';
@@ -411,11 +424,12 @@ async function benchmarkPrewarmOrder(opts={}){
     for(const mode of order)samples.push(await cycle(mode,(i+1)+'-'+mode.toLowerCase()))
   }
   await window.zeibaelResetRuntime();
+  const benchmark_snapshot_cleanup_ok=await snapshotDelete('warm-kernel-v1');
   const probe=samples.filter(x=>x.mode==='PROBE_FIRST');
   const kernel=samples.filter(x=>x.mode==='KERNEL_FIRST');
   return {
-    ok:samples.length===repeats*2&&samples.every(x=>x.ok===true)&&probe.length===repeats&&kernel.length===repeats,
-    repeats,samples,
+    ok:samples.length===repeats*2&&samples.every(x=>x.ok===true)&&probe.length===repeats&&kernel.length===repeats&&benchmark_snapshot_cleanup_ok===true,
+    repeats,benchmark_snapshot_cleanup_ok,samples,
     medians:{
       probe_first_total_ms:median(probe,'total_ms'),
       kernel_first_total_ms:median(kernel,'total_ms'),
