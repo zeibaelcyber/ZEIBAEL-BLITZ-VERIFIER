@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: blitz-parallel-sweep-${{ github.ref }}
+  group: blitz-parallel-sweep-v2-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
