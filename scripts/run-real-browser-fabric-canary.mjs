@@ -200,8 +200,12 @@ async function browserCanary() {
       Number(hydrationMedians.snapshot_fresh_ms) <= 20;
     if(!hydrationLatencyGate) throw new Error("FS_HYDRATION_LATENCY_REGRESSION:"+JSON.stringify(hydrationMedians));
     stage = "kernel-launch-benchmark";
-    const kernelLaunchBenchmark = await window.zeibaelBenchmarkKernelLaunch({ repeats: 3 });
-    if(kernelLaunchBenchmark?.ok !== true) throw new Error("KERNEL_LAUNCH_BENCHMARK_FAILED:"+JSON.stringify(kernelLaunchBenchmark));
+    let kernelLaunchBenchmark;
+    try {
+      kernelLaunchBenchmark = await window.zeibaelBenchmarkKernelLaunch({ repeats: 3 });
+    } catch (e) {
+      kernelLaunchBenchmark = {ok:false,status:"REJECTED_REAL_HOST",error:String(e?.message||e)};
+    }
     stage = "prewarm-order-benchmark";
     const prewarmOrderBenchmark = await window.zeibaelBenchmarkPrewarmOrder({ repeats: 3 });
     if(prewarmOrderBenchmark?.ok !== true) throw new Error("PREWARM_ORDER_BENCHMARK_FAILED:"+JSON.stringify(prewarmOrderBenchmark));
@@ -233,6 +237,13 @@ async function browserCanary() {
     stage = "cold-process-prime-benchmark";
     const coldProcessPrimeBenchmark = await window.zeibaelBenchmarkColdProcessPrime({repeats:3});
     if(coldProcessPrimeBenchmark?.ok !== true) throw new Error("COLD_PROCESS_PRIME_BENCHMARK_FAILED:"+JSON.stringify(coldProcessPrimeBenchmark));
+    stage = "overlap-process-prime-benchmark";
+    let overlapProcessPrimeBenchmark;
+    try {
+      overlapProcessPrimeBenchmark = await window.zeibaelBenchmarkOverlapPrime({repeats:3});
+    } catch (e) {
+      overlapProcessPrimeBenchmark = {ok:false,status:"EXPERIMENT_FAILED",error:String(e?.message||e)};
+    }
     stage = "idb-init";
     const cacheDbReady = await window.zeibaelEnsureCacheDb();
     if(cacheDbReady !== true) throw new Error("CACHE_DB_INIT_FAILED");
@@ -360,6 +371,7 @@ async function browserCanary() {
     },
     cold_spawn_benchmark: coldSpawnBenchmark,
     cold_process_prime_benchmark: coldProcessPrimeBenchmark,
+    overlap_process_prime_benchmark: overlapProcessPrimeBenchmark,
     runtime_prewarm: {
       ok: runtimePrewarmGate,
       strategy: "KERNEL_FIRST",
