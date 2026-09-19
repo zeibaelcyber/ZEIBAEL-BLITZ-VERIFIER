@@ -3,8 +3,7 @@ import readline from "node:readline";
 const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity});
 const MAX_OUTPUT=6000;
 const PREWARM_TARGET=Math.max(1,Math.min(8,Number(process.env.ZEIBAEL_KERNEL_PREWARM)||8));
-const PREWARM_READY_TARGET=Math.max(1,Math.min(PREWARM_TARGET,Number(process.env.ZEIBAEL_KERNEL_READY_PREWARM)||1));
-const PREWARM_STARTUP_PARALLELISM=Math.max(PREWARM_READY_TARGET,Math.min(PREWARM_TARGET,Number(process.env.ZEIBAEL_KERNEL_STARTUP_PARALLELISM)||2));
+const PREWARM_READY_TARGET=Math.max(1,Math.min(PREWARM_TARGET,Number(process.env.ZEIBAEL_KERNEL_READY_PREWARM)||2));
 const PREPARE_TIMEOUT_MS=5000;
 const idle=[],preparedWaiters=[];
 let preparing=0,poolSpawned=0,poolUses=0,poolColdFallbacks=0,poolReplenishments=0,poolWaitedForReplenish=0;
@@ -27,7 +26,7 @@ parentPort.postMessage({type:"ready"});
 `;
 const BOOTSTRAP_URL=new URL("data:text/javascript;base64,"+Buffer.from(BOOTSTRAP,"utf8").toString("base64"));
 function trim(s){return String(s||"").slice(-MAX_OUTPUT)}
-function poolState(){return {target:PREWARM_TARGET,ready_target:PREWARM_READY_TARGET,startup_parallelism:PREWARM_STARTUP_PARALLELISM,ready:idle.length,preparing,waiters:preparedWaiters.length,spawned:poolSpawned,prewarmed_uses:poolUses,cold_fallbacks:poolColdFallbacks,replenishments:poolReplenishments,waited_for_replenish:poolWaitedForReplenish}}
+function poolState(){return {target:PREWARM_TARGET,ready_target:PREWARM_READY_TARGET,ready:idle.length,preparing,waiters:preparedWaiters.length,spawned:poolSpawned,prewarmed_uses:poolUses,cold_fallbacks:poolColdFallbacks,replenishments:poolReplenishments,waited_for_replenish:poolWaitedForReplenish}}
 function offerPrepared(worker){
   const waiter=preparedWaiters.shift();
   if(waiter){waiter.resolve(worker);return}
@@ -76,29 +75,9 @@ function scheduleReplenish(){
   }
 }
 async function initializePool(){
-  const starters=Array.from({length:PREWARM_STARTUP_PARALLELISM},(_,i)=>
-    spawnPrepared().then(worker=>({i,worker}))
-  );
-  let first;
-  try{
-    first=await Promise.any(starters);
-  }catch{
-    const fallback=await spawnPrepared();
-    offerPrepared(fallback);
-    scheduleReplenish();
-    return
-  }
-  offerPrepared(first.worker);
-  for(const p of starters){
-    void p.then(row=>{
-      if(row.i===first.i)return;
-      offerPrepared(row.worker);
-      scheduleReplenish();
-    }).catch(async()=>{
-      try{offerPrepared(await spawnPrepared())}catch{}
-      scheduleReplenish();
-    })
-  }
+  const rows=await Promise.allSettled(Array.from({length:PREWARM_READY_TARGET},()=>spawnPrepared()));
+  for(const row of rows)if(row.status==="fulfilled")offerPrepared(row.value);
+  scheduleReplenish();
 }
 async function acquireWorker(){
   let worker=idle.pop();
